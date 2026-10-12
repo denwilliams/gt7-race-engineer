@@ -26,6 +26,20 @@ uv run gt7-engineer run                # on the PS5: start a race; the engineer 
 
 GT7 telemetry is UDP: the Mac and PlayStation must be on the same network, and the Mac must allow incoming UDP on port 33740.
 
+`run` shows a live dashboard: telemetry health and car state, mic and engineer status, and the conversation (what the analysts flagged, what the engineer said, what it heard from you). Use `--plain` for plain text lines (also used automatically when piped or with `--text`).
+
+The telemetry badge at the top of the Car panel tells you whether data is arriving:
+
+| Badge | Meaning |
+|---|---|
+| `● LIVE 60 Hz` | packets are arriving and decoding |
+| `● WAITING` | nothing received yet: is a race running, is the IP right, same network? |
+| `● BAD DATA` | packets arrive but fail decryption: wrong key or packet format |
+| `● PAUSED` | data arriving but the car isn't on track (paused, menu, loading) |
+| `● STALE` | data stopped for more than 2 s |
+
+If you wear headphones, the mic stays open while the engineer talks and you can interrupt it by speaking (`[audio] barge_in = true`, the default). On speakers set it to `false` so the engineer can't hear itself.
+
 Try it without a PlayStation, microphone or model:
 
 ```sh

@@ -6,6 +6,8 @@ import asyncio
 import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 
+from . import ui
+from .ui import fmt_lap as ui_fmt
 from .agents.base import Analyst
 from .agents.fuel import FuelAgent, fuel_rule
 from .agents.lap_trace import LapTraceAgent
@@ -16,6 +18,7 @@ from .engineer import RaceEngineer
 from .llm import ChatClient, JevDecision, OpenAIDecision, ThresholdDecision
 from .state import StateStore
 from .telemetry.packet import Frame
+from .telemetry.stats import IngestStats
 
 log = logging.getLogger(__name__)
 
@@ -40,8 +43,11 @@ async def run(
     speaking: asyncio.Event | None = None,
     stop_speaking: Callable[[], None] | None = None,
     interrupter: Interrupter | None = None,
+    stats: IngestStats | None = None,
 ) -> StateStore:
     store, bus = StateStore(), Bus()
+    stats = stats if stats is not None else IngestStats()
+    ui.attach(store=store, stats=stats)
 
     async def speak_muted(text: str) -> None:
         if speaking is not None:
@@ -103,8 +109,11 @@ async def run(
 
     try:
         async for frame in source:
+            stats.frame()
             event = store.update(frame)
             if event:
+                rec = event.record
+                ui.log("lap", f"Lap {rec.lap}: {ui_fmt(rec.time_ms)}, fuel used {rec.fuel_used:.1f} L")
                 for a in analysts:
                     spawn(a.handle_lap(event))
                 if lap_trace:

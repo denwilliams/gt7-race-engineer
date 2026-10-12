@@ -11,6 +11,8 @@ import queue
 import time
 from collections.abc import AsyncIterator
 
+from .. import ui
+
 log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
@@ -80,13 +82,14 @@ class WhisperListener:
                 text = await loop.run_in_executor(None, self._transcribe, audio)
             except Exception as e:  # one bad transcription must not end listening
                 log.exception("transcription failed")
-                print(f"❌ transcription failed ({e}); still listening", flush=True)
+                ui.log("warn", f"transcription failed ({e}); still listening")
                 return
+        ui.set_mic("listening")
         if text:
-            print(f'📝 You said: "{text}"', flush=True)
+            ui.log("you", text)
             out.put_nowait(text)
         else:
-            print("📝 (no words recognised)", flush=True)
+            ui.log("system", "(no words recognised)")
 
     async def _capture(self, out: asyncio.Queue) -> None:
         try:
@@ -109,18 +112,27 @@ class WhisperListener:
         device = sd.query_devices(kind="input")["name"]
         tasks: set[asyncio.Task] = set()
         with sd.InputStream(samplerate=SAMPLE_RATE, channels=1, blocksize=BLOCK, callback=cb):
-            print(f"🎤 Measuring room noise on '{device}' (stay quiet for a second)...", flush=True)
+            ui.set_mic("measuring room noise (stay quiet for a second)")
             noise = []
             while len(noise) < CALIBRATE_BLOCKS:
                 block = await _next_block(q)
                 noise.append(float(np.sqrt(np.mean(block**2))))
             threshold = max(MIN_THRESHOLD, NOISE_MULTIPLE * float(np.median(noise)))
             mode = "mic stays open while the engineer talks; you can interrupt" if self.on_barge_in else "mic is muted while the engineer talks"
-            print(
-                f"🎤 Listening. Speak any time (speech threshold {threshold:.4f}, room noise {np.median(noise):.4f}; {mode}).\n"
-                "   If it never reacts, check System Settings > Privacy & Security > Microphone for your terminal.",
-                flush=True,
+            ui.log(
+                "system",
+                f"Listening on '{device}' (speech threshold {threshold:.4f}, room noise {np.median(noise):.4f}; {mode}). "
+                "If it never reacts, check System Settings > Privacy & Security > Microphone for your terminal.",
             )
+            mic_state = ""
+
+            def mic(status: str, show: bool = True) -> None:
+                nonlocal mic_state
+                if status != mic_state:
+                    mic_state = status
+                    ui.set_mic(status, show)
+
+            mic("listening")
             buf: list = []
             loud_blocks = quiet = idle = 0
             peak = 0.0
@@ -132,6 +144,7 @@ class WhisperListener:
                 if speaking and self.on_barge_in is None:  # speaker mode: deaf while it talks
                     buf, loud_blocks, quiet = [], 0, 0
                     last_muted = time.monotonic()
+                    mic("muted (engineer talking)")
                     continue
                 if self.on_barge_in is None and time.monotonic() - last_muted < ECHO_TAIL_S:
                     continue
@@ -139,13 +152,13 @@ class WhisperListener:
                 loud = rms > threshold
                 if loud:
                     if not buf:
-                        print("🎤 hearing you...", flush=True)
+                        mic("hearing you")
                     buf.append(block)
                     loud_blocks += 1
                     quiet = 0
                     if speaking and not barged and loud_blocks >= INTERRUPT_BLOCKS:
                         barged = True
-                        print("✋ interrupting the engineer", flush=True)
+                        ui.log("system", "✋ interrupted the engineer")
                         self.on_barge_in()
                 elif buf:
                     buf.append(block)
@@ -154,7 +167,7 @@ class WhisperListener:
                     peak = max(peak, rms)
                     idle += 1
                     if idle >= HINT_EVERY_BLOCKS:
-                        print(f"🎤 (idle) loudest sound in the last 10 s: {peak:.4f}, speech needs > {threshold:.4f}", flush=True)
+                        mic(f"listening (loudest sound in the last 10 s: {peak:.4f}, speech needs > {threshold:.4f})")
                         idle, peak = 0, 0.0
                 if buf and (quiet >= END_SILENCE_BLOCKS or len(buf) >= MAX_BLOCKS):
                     audio = np.concatenate(buf)
@@ -163,8 +176,8 @@ class WhisperListener:
                     if not enough:
                         continue  # a click or bump, not speech
                     if len(audio) >= MAX_BLOCKS * BLOCK:
-                        print("🎤 (20 s of continuous sound: is there constant background noise?)", flush=True)
-                    print("🎤 transcribing...", flush=True)
+                        ui.log("warn", "20 s of continuous sound: is there constant background noise?")
+                    mic("transcribing")
                     t = asyncio.create_task(self._transcribe_into(audio, out))
                     tasks.add(t)
                     t.add_done_callback(tasks.discard)

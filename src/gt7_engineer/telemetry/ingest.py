@@ -8,6 +8,7 @@ import time
 from collections.abc import AsyncIterator
 
 from .packet import Frame, parse
+from .stats import IngestStats
 
 log = logging.getLogger(__name__)
 
@@ -27,7 +28,9 @@ class _Protocol(asyncio.DatagramProtocol):
         self.queue.put_nowait(data)
 
 
-async def frames(ps_ip: str, recv_port: int = RECV_PORT) -> AsyncIterator[Frame]:
+async def frames(
+    ps_ip: str, recv_port: int = RECV_PORT, stats: IngestStats | None = None
+) -> AsyncIterator[Frame]:
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=600)
     transport, _ = await loop.create_datagram_endpoint(
@@ -43,8 +46,12 @@ async def frames(ps_ip: str, recv_port: int = RECV_PORT) -> AsyncIterator[Frame]
     try:
         while True:
             data = await queue.get()
+            if stats is not None:
+                stats.received += 1
             frame = parse(data, time.monotonic())
             if frame is None:
+                if stats is not None:
+                    stats.rejected += 1
                 log.debug("ignoring invalid packet (%d bytes)", len(data))
                 continue
             yield frame

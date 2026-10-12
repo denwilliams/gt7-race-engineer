@@ -8,6 +8,7 @@ import logging
 import re
 from collections.abc import Awaitable, Callable
 
+from . import ui
 from .bus import PRIORITY, URGENT, Assessment, Bus
 from .llm import ChatClient
 from .state import NewLap, StateStore
@@ -66,10 +67,13 @@ class RaceEngineer:
             self._last_spoke = self._now()
             self.history.append({"role": "assistant", "content": text})
             self._saying, self._interrupted = True, False
+            ui.log("engineer", text)
+            ui.set_engineer("speaking")
             try:
                 await self.speak(text)
             finally:
                 self._saying = False
+                ui.set_engineer("idle")
                 if self._interrupted:  # the driver only heard part of it
                     self.history[-1] = {"role": "assistant", "content": f"{text} [cut off by the driver]"}
 
@@ -77,6 +81,7 @@ class RaceEngineer:
         facts = " ".join(a.message for a in items)
         if self.client is None:
             return f"{facts} {extra}".strip()
+        ui.set_engineer("thinking")
         try:
             text = await self.client.chat(
                 [
@@ -95,6 +100,7 @@ class RaceEngineer:
         """Drain analyst assessments; speak urgent ones now, queue the rest for the lap update."""
         while True:
             a = await self.bus.queue.get()
+            ui.log("analyst", f"[{a.level}] {a.message}")
             if a.topic in self.pending and PRIORITY[self.pending[a.topic].level] > PRIORITY[a.level]:
                 continue  # keep the more severe one
             self.pending[a.topic] = a
@@ -142,6 +148,7 @@ class RaceEngineer:
         state = json.dumps(self.store.summary())
         if self.client is None:
             return "No language model is configured, so I can't answer that."
+        ui.set_engineer("thinking")
         try:
             text = await self.client.chat(
                 [{"role": "system", "content": f"{SYSTEM}\nCurrent car and race state: {state}"}]

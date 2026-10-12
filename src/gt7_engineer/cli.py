@@ -6,14 +6,16 @@ import logging
 import os
 import signal
 import sys
+from urllib.parse import urlparse
 
-from . import app, config
+from . import app, config, ui
 from .audio.tts import PrintTTS, make_tts
 from .state import StateStore
 from .telemetry import ingest, simulator
+from .telemetry.stats import IngestStats
 
 
-def _source(args, cfg):
+def _source(args, cfg, stats: IngestStats):
     if args.simulate:
         return simulator.frames(
             lap_seconds=args.lap_seconds, total_laps=args.laps, speedup=args.speedup,
@@ -21,13 +23,29 @@ def _source(args, cfg):
         )
     if not cfg.ps_ip:
         sys.exit("Set the PlayStation IP: --ps-ip 192.168.x.x, GT7_PS_IP, or ps_ip in config.toml (or use --simulate)")
-    return ingest.frames(cfg.ps_ip)
+    return ingest.frames(cfg.ps_ip, stats=stats)
+
+
+def _setup_ui(args) -> None:
+    """Live dashboard on a real terminal; plain lines for pipes, --text, --plain."""
+    if sys.stdout.isatty() and not args.plain and not args.text:
+        ui.use(ui.RichUI())
+        root = logging.getLogger()
+        root.handlers = [ui.UIHandler()]  # warnings/errors go into the dashboard, not over it
+        ui.ui.start()
 
 
 async def _run(args) -> None:
     cfg = config.load(args.config)
     if args.ps_ip:
         cfg.ps_ip = args.ps_ip
+    stats = IngestStats()
+    info = {
+        "ps_ip": "simulator" if args.simulate else cfg.ps_ip,
+        "Source": "simulator" if args.simulate else f"PlayStation {cfg.ps_ip}",
+    }
+    if not args.no_llm:
+        info["LLM"] = f"{cfg.engineer.model} @ {urlparse(cfg.engineer.base_url).netloc}"
     speaking = asyncio.Event()
     stop_speaking = interrupter = None
     if args.text:
@@ -43,21 +61,17 @@ async def _run(args) -> None:
         interrupter = app.Interrupter()
         listener = WhisperListener(cfg.stt_model, speaking, interrupter.fire if cfg.audio.barge_in else None)
         stop_speaking = tts.stop
-        print(
-            f"Loading speech recognition ({cfg.stt_model}) and voice ({cfg.tts.engine}); "
-            "the first run downloads the models...",
-            flush=True,
-        )
+        info["Voice"] = f"{cfg.tts.engine} / {getattr(tts, 'voice', '') or 'default'}"
+        info["Interrupt"] = "mic open (headphones)" if cfg.audio.barge_in else "mic muted while it talks"
+        ui.attach(stats=stats, info=info)
+        ui.set_mic("loading speech recognition")
+        ui.log("system", f"Loading speech recognition ({cfg.stt_model}) and voice ({cfg.tts.engine}); the first run downloads models...")
         await asyncio.gather(listener.warmup(), tts.warmup())  # Whisper starts loading immediately, in parallel
-
-        async def speak(text: str) -> None:
-            print(f"\n🎙  ENGINEER: {text}\n", flush=True)  # exact text handed to the TTS engine
-            await tts.speak(text)
-
-        utterances = listener.utterances()
+        speak, utterances = tts.speak, listener.utterances()
+    ui.attach(stats=stats, info=info)
     await app.run(
-        cfg, _source(args, cfg), speak, utterances, use_llm=not args.no_llm, speaking=speaking,
-        stop_speaking=stop_speaking, interrupter=interrupter,
+        cfg, _source(args, cfg, stats), speak, utterances, use_llm=not args.no_llm, speaking=speaking,
+        stop_speaking=stop_speaking, interrupter=interrupter, stats=stats,
     )
 
 
@@ -65,14 +79,18 @@ async def _watch(args) -> None:
     cfg = config.load(args.config)
     if args.ps_ip:
         cfg.ps_ip = args.ps_ip
-    store = StateStore()
+    stats, store = IngestStats(), StateStore()
+    ui.attach(store=store, stats=stats, info={"ps_ip": "simulator" if args.simulate else cfg.ps_ip})
+    ui.set_mic("n/a (watch mode)", show=False)
+    ui.log("system", "Watching telemetry only (no engineer, no mic).")
     n = 0
-    async for f in _source(args, cfg):
+    async for f in _source(args, cfg, stats):
+        stats.frame()
         ev = store.update(f)
         n += 1
         if ev:
-            print(f"--- lap {ev.record.lap} done: {ev.record.time_ms} ms, fuel used {ev.record.fuel_used:.2f} L")
-        if n % 30 == 0:
+            ui.log("lap", f"Lap {ev.record.lap}: {ui.fmt_lap(ev.record.time_ms)}, fuel used {ev.record.fuel_used:.2f} L")
+        if not ui.ui.interactive and n % 30 == 0:
             print(store.summary(), flush=True)
 
 
@@ -89,16 +107,19 @@ def main() -> None:
     p.add_argument("--text", action="store_true", help="type to the engineer and print replies (no mic/speaker)")
     p.add_argument("--no-audio", action="store_true", help="print only (simulate mode)")
     p.add_argument("--no-llm", action="store_true", help="no language model: rule-based calls only")
+    p.add_argument("--plain", action="store_true", help="plain text lines instead of the live dashboard")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(message)s")
     if not args.verbose:
         for noisy in ("httpx", "httpcore", "huggingface_hub"):
             logging.getLogger(noisy).setLevel(logging.WARNING)
+    _setup_ui(args)
 
     def stop(*_) -> None:
         # Mic, TTS and Whisper run in worker threads that block for a while; a normal
         # shutdown waits for them (hence needing Ctrl-C twice). Nothing needs flushing.
+        ui.ui.close()  # leave the dashboard's alternate screen before exiting
         print("\nStopped.", flush=True)
         os._exit(0)
 
@@ -107,6 +128,8 @@ def main() -> None:
         asyncio.run(_run(args) if args.command == "run" else _watch(args))
     except KeyboardInterrupt:
         pass
+    finally:
+        ui.ui.close()
 
 
 if __name__ == "__main__":

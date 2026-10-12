@@ -45,13 +45,13 @@ class SayTTS:
 
 
 class PrintTTS:
-    """Text-only output for development without audio."""
+    """No audio: the engineer shows what it would say via the UI."""
 
     def stop(self) -> None:
         pass
 
     async def speak(self, text: str) -> None:
-        print(f"\n🎙  ENGINEER: {text}\n", flush=True)
+        pass  # the engineer already shows what it says (ui.log)
 
 
 SAMPLE_RATE = 24000

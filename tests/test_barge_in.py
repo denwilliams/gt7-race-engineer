@@ -18,6 +18,7 @@ from gt7_engineer.telemetry import simulator
 
 def test_play_stream_stops_midway_and_aborts(monkeypatch):
     writes, aborted = [], []
+    stop = threading.Event()
 
     class FakeStream:
         def __init__(self, **kw): pass
@@ -27,21 +28,36 @@ def test_play_stream_stops_midway_and_aborts(monkeypatch):
         def abort(self): aborted.append(True)
         def write(self, c):
             writes.append(len(c))
-            time.sleep(0.01)
+            if len(writes) == 3:
+                stop.set()  # the driver interrupts while the third chunk is playing
             return False
 
     monkeypatch.setattr(sd, "OutputStream", FakeStream)
-    stop = threading.Event()
 
     def gen():
-        for i in range(200):
-            if i == 5:
-                stop.set()  # the driver interrupts after 5 chunks
+        for _ in range(200):
             yield np.ones(4800, dtype=np.float32)
 
     play_stream(gen(), prebuffer=0.1, stop=stop)
-    assert 0 < len(writes) < 20  # nowhere near all 200 chunks
+    assert 3 <= len(writes) <= 5  # stopped right after the interrupt, not after all 200 chunks
     assert aborted  # buffered audio was discarded, not drained
+
+
+def test_play_stream_interrupted_before_any_audio_plays_nothing(monkeypatch):
+    opened = []
+
+    class FakeStream:
+        def __init__(self, **kw): opened.append(1)
+        def start(self): pass
+        def stop(self): pass
+        def close(self): pass
+        def abort(self): pass
+        def write(self, c): raise AssertionError("must not write after an interrupt")
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+    stop = threading.Event()
+    stop.set()
+    play_stream((np.ones(4800, dtype=np.float32) for _ in range(5)), prebuffer=0.1, stop=stop)
 
 
 def make_engineer(stop):
