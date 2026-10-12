@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import logging
+import os
+import signal
 import sys
 
 from . import app, config
@@ -84,6 +86,17 @@ def main() -> None:
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(message)s")
+    if not args.verbose:
+        for noisy in ("httpx", "httpcore", "huggingface_hub"):
+            logging.getLogger(noisy).setLevel(logging.WARNING)
+
+    def stop(*_) -> None:
+        # Mic, TTS and Whisper run in worker threads that block for a while; a normal
+        # shutdown waits for them (hence needing Ctrl-C twice). Nothing needs flushing.
+        print("\nStopped.", flush=True)
+        os._exit(0)
+
+    signal.signal(signal.SIGINT, stop)
     try:
         asyncio.run(_run(args) if args.command == "run" else _watch(args))
     except KeyboardInterrupt:
