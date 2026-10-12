@@ -138,6 +138,11 @@ async def run(
                 engineer.reset()
                 ui.log("system", f"🔄 New race detected ({event.reason}): state reset")
                 event = None
+            while store.events:  # pit stops finished since the last frame
+                stop = store.events.popleft()
+                bits = ([f"+{stop.added_l:.0f} L"] if stop.added_l else []) + (["new tyres"] if stop.tyres_changed else [])
+                ui.log("lap", f"🛞 Pit stop, lap {stop.lap}: {', '.join(bits)}")
+                spawn(engineer.on_pit_stop(stop))
             if event:
                 rec = event.record
                 ui.log("lap", f"Lap {rec.lap}: {ui_fmt(rec.time_ms)}, fuel used {rec.fuel_used:.1f} L")

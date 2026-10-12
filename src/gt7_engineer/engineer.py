@@ -9,7 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 
 from . import ui
-from .briefing import lap_update
+from .briefing import lap_update, pit_update
 from .bus import PRIORITY, URGENT, Assessment, Bus
 from .llm import MAX_REPLY_TOKENS, ChatClient
 from .state import NewLap, StateStore
@@ -178,6 +178,14 @@ class RaceEngineer:
             parts.append(TYRE_QUESTION)
             self.awaiting_tyre_reply = True
         await self._say(" ".join(p for p in parts if p))
+
+    async def on_pit_stop(self, stop) -> None:
+        """The car has left the pits. If the lap update does not cover it, say it on its own."""
+        await asyncio.sleep(3.0)  # the lap counter usually ticks over right at pit exit
+        if stop.announced:
+            return
+        stop.announced = True
+        await self._say(pit_update(self.store, stop))
 
     # ---- driver -------------------------------------------------------
     async def on_driver(self, text: str) -> None:

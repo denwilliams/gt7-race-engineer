@@ -57,29 +57,18 @@ def say_delta(ms: int) -> str:
     return f"{say_num(tenths / 10)} seconds"
 
 
-def lap_update(store: StateStore, event: NewLap) -> str:
-    """One short radio update for the lap that is just starting."""
+def pit_summary(stop) -> str:
+    """What the stop did: only the services that actually happened (a stop can be fuel, tyres, both)."""
+    parts = ["Pit stop done."]
+    if stop.added_l:
+        parts.append(f"Added {say_num(stop.added_l, 0)} litres.")
+    if stop.tyres_changed:
+        parts.append("New tyres.")
+    return " ".join(parts)
+
+
+def _fuel_sentence(store: StateStore) -> str | None:
     car = store.car
-    rec = event.record
-    parts: list[str] = []
-
-    if car is not None:
-        new_lap = rec.lap + 1  # from the event itself, not the live state, which may have moved on
-        parts.append(f"Lap {say_int(new_lap)}" + (f" of {say_int(car.total_laps)}" if car.total_laps else "") + ".")
-
-    if rec.time_ms and rec.time_ms > 0:
-        before = [l.time_ms for l in store.laps if l is not rec and l.time_ms > 0]
-        best = min(before) if before else None
-        text = say_lap_time(rec.time_ms)
-        if best is None:
-            parts.append(f"Last lap {text}.")
-        elif rec.time_ms < best:
-            d = say_delta(best - rec.time_ms)
-            parts.append(f"New best, {text}" + (f", {d} up." if d else "."))
-        else:
-            d = say_delta(rec.time_ms - best)
-            parts.append(f"Last lap {text}, " + (f"{d} off best." if d else "level with your best."))
-
     fpl = store.fuel_per_lap
     if car is not None and fpl:
         laps_of_fuel = car.fuel / fpl
@@ -95,9 +84,47 @@ def lap_update(store: StateStore, event: NewLap) -> str:
         trend = store.burn_trend
         if trend and trend[1] in ("heavier", "lighter"):
             fuel += f" Burn {'rising' if trend[1] == 'heavier' else 'falling'}."
+        return fuel
+    if car is not None and car.fuel_capacity:
+        return f"Fuel {say_int(round(car.fuel))} litres."
+    return None
+
+
+def pit_update(store: StateStore, stop) -> str:
+    """Standalone announcement when the car leaves the pits (if no lap update has covered it)."""
+    return " ".join(p for p in (pit_summary(stop), _fuel_sentence(store)) if p)
+
+
+def lap_update(store: StateStore, event: NewLap) -> str:
+    """One short radio update for the lap that is just starting."""
+    car = store.car
+    rec = event.record
+    parts: list[str] = []
+
+    if car is not None:
+        new_lap = rec.lap + 1  # from the event itself, not the live state, which may have moved on
+        parts.append(f"Lap {say_int(new_lap)}" + (f" of {say_int(car.total_laps)}" if car.total_laps else "") + ".")
+
+    stop = store.pit_stops[-1] if store.pit_stops else None
+    if stop is not None and not stop.announced and car is not None and car.t - stop.t < 25:
+        parts.append(pit_summary(stop))  # the stop has just finished: say it here, once
+        stop.announced = True
+
+    if rec.time_ms and rec.time_ms > 0:
+        before = [l.time_ms for l in store.laps if l is not rec and l.time_ms > 0]
+        best = min(before) if before else None
+        text = say_lap_time(rec.time_ms)
+        if best is None:
+            parts.append(f"Last lap {text}.")
+        elif rec.time_ms < best:
+            d = say_delta(best - rec.time_ms)
+            parts.append(f"New best, {text}" + (f", {d} up." if d else "."))
+        else:
+            d = say_delta(rec.time_ms - best)
+            parts.append(f"Last lap {text}, " + (f"{d} off best." if d else "level with your best."))
+
+    if (fuel := _fuel_sentence(store)) is not None:
         parts.append(fuel)
-    elif car is not None and car.fuel_capacity:
-        parts.append(f"Fuel {say_int(round(car.fuel))} litres.")
 
     now_pos = store.position_at_lap_start.get(rec.lap + 1, store.position)  # where this new lap began
     if now_pos is not None and store.position is not None and car is not None:

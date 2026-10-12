@@ -40,6 +40,8 @@ The telemetry badge at the top of the Car panel tells you whether data is arrivi
 
 Lap length is measured from the car's position changes (the median of clean complete laps, so pit laps don't skew it) and the dashboard shows how far through the current lap you are. It needs one complete lap, and it is approximate.
 
+Pit stops are detected from the telemetry itself: a refuel (stationary, fuel climbing) and a tyre change (all four temperatures snap to the same lower value) are found independently, because a stop can be fuel only, tyres only, or both. Either one is announced when the car drives away, a tyre change clears an out-of-date wear report, and the dashboard shows how many laps old the tyres are.
+
 The race state resets automatically when a new race starts (the lap counter drops back and stays there), or press `r` on the dashboard to reset it yourself.
 
 If you wear headphones, the mic stays open while the engineer talks and you can interrupt it by speaking (`[audio] barge_in = true`, the default). On speakers set it to `false` so the engineer can't hear itself.

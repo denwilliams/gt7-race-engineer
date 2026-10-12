@@ -229,7 +229,8 @@ class RichUI:
                 t.add_row("Fuel @ lap start", "  ".join(f"L{lap} {v}" for lap, v in starts))
             t.add_row("Last / best", f"{fmt_lap(car.last_lap_ms)} / {fmt_lap(car.best_lap_ms)}")
             fl, fr, rl, rr = (round(x) for x in car.tyre_temp)
-            t.add_row("Tyres °C", f"FL {fl}  FR {fr}\n RL {rl}  RR {rr}")
+            age = sm.get("tyre_age_laps")
+            t.add_row("Tyres °C", f"FL {fl}  FR {fr}" + (f"   [dim]{age} laps old[/]" if age is not None else "") + f"\n RL {rl}  RR {rr}")
             if "driver_reported_tyre_wear" in sm:
                 t.add_row("Tyre wear", f"(you said) {sm['driver_reported_tyre_wear']}")
         return Panel(t, title="Car", border_style=colour if badge != "LIVE" else "green")

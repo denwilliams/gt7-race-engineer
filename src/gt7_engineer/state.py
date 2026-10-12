@@ -7,6 +7,7 @@ import statistics
 from collections import deque
 from dataclasses import dataclass, field
 
+from .pit import PitDetector, PitStop, TyreChange
 from .telemetry.packet import Frame
 from .timefmt import fmt_lap
 
@@ -80,6 +81,10 @@ class StateStore:
         self._prev_fuel: float | None = None
         self._lap_min_fuel = float("inf")  # lowest fuel level seen this lap (to tell refuels from jitter)
         self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
+        self.pit = PitDetector()
+        self.pit_stops: list[PitStop] = []
+        self.events: deque[PitStop] = deque(maxlen=50)  # drained by the app (pit stops to announce)
+        self.tyres_first_lap: int | None = None  # first lap run on the current set of tyres (None: unknown)
         self._lap_dist = 0.0  # metres driven so far this lap
         self._lap_dist_ok = True  # False once a teleport is seen this lap
         self._race_start_fuel: float | None = None  # fuel on the grid, before the race's first line crossing
@@ -142,6 +147,13 @@ class StateStore:
             self._fuel_burned += self._prev_fuel - f.fuel
             self._prev_fuel = f.fuel
         # a small rise is jitter: keep the lower baseline so the same litres are not counted twice
+        for ev in self.pit.update(f):  # refuel / new tyres / pit stop complete
+            if isinstance(ev, TyreChange):
+                self.tyres_first_lap = ev.lap + 1  # the lap in progress is a part-lap on the new set
+                self.reports = [r for r in self.reports if r.kind != "tyre_wear"]  # an old wear report is now wrong
+            else:
+                self.pit_stops.append(ev)
+                self.events.append(ev)
         if self._lap_frames and not (self._lap_frames[-1].lap <= f.lap <= self._lap_frames[-1].lap + 1):
             return None  # lap numbers only ever go up by one: anything else is a glitch (or a new race, handled before)
         step, jumped = 0.0, False
@@ -173,6 +185,7 @@ class StateStore:
             # Lap 0 -> 1: the race itself starts at the line. What came before was the run-up, not a lap.
             if not self._lap_partial:
                 self._race_start_fuel = self._lap_start_fuel
+                self.tyres_first_lap = 1  # the race starts on a fresh set
             self._lap_frames = []
             self._lap_start_fuel = None
             self._lap_min_fuel = float("inf")
@@ -190,6 +203,8 @@ class StateStore:
             self._lap_start_fuel = f.fuel
             if self._lap_partial is None:  # first lap we see: complete only if it starts from the grid
                 self._lap_partial = not (f.lap == 0 or (f.lap == 1 and f.speed < 2.0))  # grid/run-up, or a standing start
+                if not self._lap_partial:
+                    self.tyres_first_lap = 1  # we saw the race start: the tyres are the starting set
         if f.lap >= 1 and not self._lap_partial and f.lap not in self.fuel_at_lap_start:
             self.fuel_at_lap_start[f.lap] = f.fuel  # first frame seen with this lap number
             if self.position is not None:
@@ -211,6 +226,13 @@ class StateStore:
         if self._position is None or self.car is None or self.car.t - self._position_t > POSITION_STALE_S:
             return None
         return self._position
+
+    @property
+    def tyre_age_laps(self) -> int | None:
+        """Complete laps run on the current set of tyres; None if the start of the set was not seen."""
+        if self.tyres_first_lap is None or self.car is None:
+            return None
+        return max(0, self.car.lap - self.tyres_first_lap)
 
     @property
     def lap_length_m(self) -> float | None:
@@ -370,6 +392,13 @@ class StateStore:
             out["fuel_used_this_lap_so_far_l"] = round(max(0.0, self._lap_start_fuel - c.fuel), 1)
         if self.fuel_at_lap_start:
             out["fuel_at_lap_start_l"] = {lap: round(v, 1) for lap, v in sorted(self.fuel_at_lap_start.items())}
+        if (age := self.tyre_age_laps) is not None:
+            out["tyre_age_laps"] = age
+        if self.pit_stops:
+            out["pit_stops"] = [
+                {"lap": p.lap, "fuel_added_l": round(p.added_l, 1) if p.added_l else None, "new_tyres": p.tyres_changed}
+                for p in self.pit_stops
+            ]
         if (length := self.lap_length_m) is not None:
             out["lap_length_m"] = round(length)
             if (prog := self.lap_progress) is not None:
