@@ -129,7 +129,6 @@ class MLXTTS:
         self.speed = cfg.speed
         self.prebuffer = cfg.prebuffer
         self.last_underrun_s = 0.0  # device underflow count for the last utterance (0 = clean)
-        self.streaming_interval = 0.32  # qwen3: seconds of audio per streamed chunk
         self._model = None
 
     def _load(self):
@@ -146,7 +145,7 @@ class MLXTTS:
         if self.engine == "qwen3":
             gen = m.generate_custom_voice(
                 text=text, speaker=self.voice, language="English", instruct=self.instruct or None,
-                stream=True, streaming_interval=self.streaming_interval,
+                stream=True,
             )
         else:
             gen = m.generate(text=text, voice=self.voice, speed=self.speed, lang_code="a")

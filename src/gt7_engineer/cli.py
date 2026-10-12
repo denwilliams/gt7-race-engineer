@@ -39,7 +39,12 @@ async def _run(args) -> None:
         tts = make_tts(cfg.tts)
         print(f"Loading voice ({cfg.tts.engine})...", flush=True)
         await tts.warmup()
-        speak, utterances = tts.speak, WhisperListener(cfg.stt_model, speaking).utterances()
+
+        async def speak(text: str) -> None:
+            print(f"\n🎙  ENGINEER: {text}\n", flush=True)  # exact text handed to the TTS engine
+            await tts.speak(text)
+
+        utterances = WhisperListener(cfg.stt_model, speaking).utterances()
     await app.run(cfg, _source(args, cfg), speak, utterances, use_llm=not args.no_llm, speaking=speaking)
 
 
