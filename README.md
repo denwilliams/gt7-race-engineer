@@ -94,6 +94,10 @@ PS5 --UDP--> Telemetry ingest (decrypt/decode)
 - **Voice.** `[tts] engine = "qwen3" | "kokoro" | "say"`. The neural engines run through mlx-audio, stream audio as it is generated and are warmed up at startup (first call is much slower). The first run downloads the model.
 - **Models.** Every LLM role (engineer, lap reviewer, decision model) is configured with an OpenAI-compatible base URL, headers and model name. Whisper (STT) and TTS run locally and are swappable behind interfaces.
 
+### Using a ChatGPT/Codex subscription (Pi)
+
+Set `kind = "pi"` on `[engineer]` (and `[lap_reviewer]` inherits it) to route chat through the [Pi](https://pi.dev) coding-agent harness in RPC mode. Pi handles the subscription login, so no API key is needed. The app keeps one long-lived `pi --mode rpc` child process with tools, extensions, skills and MCP switched off, and starts a fresh session per call. Setup: run `pi`, `/login`, choose ChatGPT Plus/Pro (Codex); then `pi --list-models` for the model id. See `config.example.toml`. This is cloud: prompts including race state go to OpenAI via Pi.
+
 ### Decision model
 
 Optional. Without one, analysts use built-in threshold rules. Three ways to plug one in via `[decision]` in `config.toml`:

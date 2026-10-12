@@ -15,7 +15,7 @@ from .agents.pace import PaceAgent, pace_rule
 from .bus import Bus
 from .config import Config
 from .engineer import RaceEngineer
-from .llm import ChatClient, JevDecision, OpenAIDecision, ThresholdDecision
+from .llm import ChatClient, JevDecision, OpenAIDecision, ThresholdDecision, make_chat
 from .state import StateStore
 from .telemetry.packet import Frame
 from .telemetry.stats import IngestStats
@@ -58,8 +58,8 @@ async def run(
             if speaking is not None:
                 speaking.clear()
 
-    engineer_client = ChatClient(cfg.engineer) if use_llm else None
-    reviewer_client = ChatClient(cfg.lap_reviewer) if use_llm else None
+    engineer_client = make_chat(cfg.engineer) if use_llm else None
+    reviewer_client = make_chat(cfg.lap_reviewer) if use_llm else None
     jev = JevDecision(cfg.decision, "ignore") if use_llm and cfg.decision and cfg.decision.kind == "jev" else None
     decision_client = ChatClient(cfg.decision) if use_llm and cfg.decision and not jev else None
 

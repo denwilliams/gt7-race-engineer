@@ -2,9 +2,11 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
+import shutil
 from typing import Protocol
 
 import httpx
@@ -44,6 +46,119 @@ class ChatClient:
 
     async def aclose(self) -> None:
         await self._http.aclose()
+
+
+class PiClient:
+    """Chat through the Pi coding-agent harness in RPC mode (https://pi.dev).
+
+    Uses whatever Pi is logged in with, e.g. a ChatGPT Plus/Pro (Codex) subscription,
+    so no API key is needed. One long-lived `pi --mode rpc` child process serves all
+    calls; every call starts a fresh Pi session so there is no hidden history (this app
+    sends its own context). Tools, extensions, skills and MCP are disabled: it is used
+    as a plain text model. Implements the same `chat()` as ChatClient.
+    NOTE: this sends race data to whichever cloud provider Pi is logged in to.
+    """
+
+    BASE_SYSTEM = (
+        "You are a text model embedded in a race engineer app. Follow the instructions in each "
+        "message exactly and reply with only the requested text."
+    )
+
+    def __init__(self, cfg: ModelConfig, command: str = "pi"):
+        self.cfg, self.command = cfg, command
+        self._proc: asyncio.subprocess.Process | None = None
+        self._lock = asyncio.Lock()
+        self._n = 0
+
+    def _argv(self) -> list[str]:
+        argv = [
+            self.command, "--mode", "rpc", "--no-session", "--no-tools", "--no-extensions", "--no-skills",
+            "--no-mcp", "--no-context-files", "--no-prompt-templates", "--system-prompt", self.BASE_SYSTEM,
+        ]
+        if self.cfg.provider:
+            argv += ["--provider", self.cfg.provider]
+        if self.cfg.model:
+            argv += ["--model", self.cfg.model]
+        effort = {"none": "off"}.get(self.cfg.reasoning_effort, self.cfg.reasoning_effort)
+        argv += ["--thinking", effort or "off"]
+        return argv
+
+    async def _ensure(self) -> asyncio.subprocess.Process:
+        if self._proc is None or self._proc.returncode is not None:
+            if shutil.which(self.command) is None:
+                raise RuntimeError(f"'{self.command}' not found on PATH; install Pi (https://pi.dev) and run /login")
+            self._proc = await asyncio.create_subprocess_exec(
+                *self._argv(), stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.DEVNULL, limit=1 << 24,
+            )
+        return self._proc
+
+    async def _send(self, proc, cmd: dict) -> str:
+        self._n += 1
+        rid = f"gt7-{self._n}"
+        proc.stdin.write((json.dumps({**cmd, "id": rid}) + "\n").encode())
+        await proc.stdin.drain()
+        return rid
+
+    async def _read(self, proc) -> dict:
+        line = await proc.stdout.readline()
+        if not line:
+            raise RuntimeError("pi exited unexpectedly (not logged in? run `pi`, then /login)")
+        return json.loads(line)
+
+    async def _response(self, proc, rid: str) -> dict:
+        while True:
+            msg = await self._read(proc)
+            if msg.get("type") == "response" and msg.get("id") == rid:
+                if not msg.get("success"):
+                    raise RuntimeError(f"pi {msg.get('command')} failed: {msg.get('error')}")
+                return msg
+
+    @staticmethod
+    def render(messages: list[dict]) -> str:
+        """Flatten chat messages into one prompt: instructions first, then the conversation."""
+        system = "\n".join(m["content"] for m in messages if m["role"] == "system")
+        turns = [m for m in messages if m["role"] != "system"]
+        parts = []
+        if system:
+            parts.append(f"Instructions:\n{system}")
+        if len(turns) == 1:
+            parts.append(turns[0]["content"])
+        else:
+            parts.append("Conversation so far:\n" + "\n".join(f"{m['role']}: {m['content']}" for m in turns[:-1]))
+            parts.append(f"Reply to the latest message:\n{turns[-1]['content']}")
+        return "\n\n".join(parts)
+
+    async def chat(self, messages: list[dict], max_tokens: int = 200, temperature: float = 0.3) -> str:
+        async with self._lock:
+            try:
+                return await asyncio.wait_for(self._chat(messages), self.cfg.timeout)
+            except BaseException:
+                await self._kill()  # never leave a wedged process behind; the next call restarts it
+                raise
+
+    async def _chat(self, messages: list[dict]) -> str:
+        proc = await self._ensure()
+        await self._response(proc, await self._send(proc, {"type": "new_session"}))
+        await self._response(proc, await self._send(proc, {"type": "prompt", "message": self.render(messages)}))
+        while True:  # wait for the run (including any automatic retries) to finish
+            if (await self._read(proc)).get("type") == "agent_settled":
+                break
+        msg = await self._response(proc, await self._send(proc, {"type": "get_last_assistant_text"}))
+        return ((msg.get("data") or {}).get("text") or "").strip()
+
+    async def _kill(self) -> None:
+        if self._proc is not None and self._proc.returncode is None:
+            self._proc.kill()
+            await self._proc.wait()
+        self._proc = None
+
+    async def aclose(self) -> None:
+        await self._kill()
+
+
+def make_chat(cfg: ModelConfig) -> "ChatClient | PiClient":
+    return PiClient(cfg) if cfg.kind == "pi" else ChatClient(cfg)
 
 
 class DecisionModel(Protocol):

@@ -23,6 +23,16 @@ model = "your-chat-model"
 # headers = { Authorization = "Bearer ..." }
 # reasoning_effort = "none"   # switch off thinking on reasoning models (e.g. gemma4 on Ollama), else replies can come back empty
 
+# Or use your ChatGPT Plus/Pro (Codex) subscription through the Pi harness (https://pi.dev), no API key:
+#   1. run `pi`, type /login, pick ChatGPT Plus/Pro (Codex), then /quit
+#   2. `pi --list-models` shows the model ids you can use
+# [engineer]
+# kind = "pi"
+# provider = "openai-codex"
+# model = "<id from pi --list-models>"
+# reasoning_effort = "none"   # pi thinking level: none/off, minimal, low, medium, high
+# (NOT local: prompts, including race state, go to OpenAI via Pi.)
+
 # Optional: defaults to the [engineer] endpoint
 [lap_reviewer]
 model = "your-chat-model"

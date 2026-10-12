@@ -17,7 +17,8 @@ class ModelConfig:
     headers: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0
     reasoning_effort: str = ""  # e.g. "none" to switch off thinking on reasoning models (Ollama/OpenAI-style)
-    kind: str = "chat"  # decision model only: "chat" (one-word prompt) or "jev" (Decisions API)
+    kind: str = "chat"  # engineer/reviewer: "chat" (OpenAI-compatible) or "pi" (Pi harness); decision: "chat" or "jev"
+    provider: str = ""  # kind = "pi" only: Pi provider, e.g. "openai-codex" (ChatGPT Plus/Pro login)
     api_key_env: str = ""  # name of an env var holding a bearer token, e.g. OPENROUTER_API_KEY
 
     def auth_headers(self) -> dict[str, str]:
