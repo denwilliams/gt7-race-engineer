@@ -10,6 +10,7 @@ from .telemetry.packet import Frame
 FRAME_HZ = 60
 HISTORY_SECONDS = 600
 REFUEL_JUMP_L = 0.5  # a rise in fuel level bigger than this between frames means a pit stop
+POSITION_STALE_S = 5.0  # a position not refreshed for this long is no longer 'current'
 TREND_STEADY_PCT = 3.0  # burn changes smaller than this per lap count as steady
 
 
@@ -47,15 +48,22 @@ class StateStore:
         self._lap_start_fuel: float | None = None
         self._refuelled = False
         self.fuel_at_lap_start: dict[int, float] = {}  # lap number -> litres when it began (whole race)
-        self.start_position: int | None = None  # grid position, only reported by GT7 before the race starts
+        self._position: int | None = None  # last position reported by telemetry
+        self._position_t = 0.0
         self.num_cars: int | None = None
+        self.start_position: int | None = None  # first position seen, on the grid / lap 1
+        self.position_at_lap_start: dict[int, int] = {}
 
     # ---- ingest -------------------------------------------------------
     def update(self, f: Frame) -> NewLap | None:
         self.car = f
         self.frames.append(f)
-        if f.start_position > 0:  # GT7 reports -1 once the race has started, so remember it
-            self.start_position, self.num_cars = f.start_position, f.num_cars if f.num_cars > 0 else self.num_cars
+        if f.race_position > 0:  # -1 in modes that don't report it
+            self._position, self._position_t = f.race_position, f.t
+            if f.num_cars > 0:
+                self.num_cars = f.num_cars
+            if self.start_position is None and f.lap <= 1:
+                self.start_position = f.race_position
         if not f.on_track:
             return None
         event = None
@@ -78,6 +86,8 @@ class StateStore:
             self._lap_start_fuel = f.fuel
             if f.lap >= 1:
                 self.fuel_at_lap_start[f.lap] = f.fuel
+                if self.position is not None:
+                    self.position_at_lap_start[f.lap] = self.position
         self._lap_frames.append(f)
         return event
 
@@ -89,6 +99,13 @@ class StateStore:
         self.reports.append(DriverReport(t if t is not None else self.car.t if self.car else 0.0, kind, value))
 
     # ---- queries ------------------------------------------------------
+    @property
+    def position(self) -> int | None:
+        """Current race position from telemetry; None if the mode doesn't report it (or it went stale)."""
+        if self._position is None or self.car is None or self.car.t - self._position_t > POSITION_STALE_S:
+            return None
+        return self._position
+
     @property
     def lap(self) -> int:
         return self.car.lap if self.car else 0
@@ -188,14 +205,19 @@ class StateStore:
             out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L/lap every lap)"
         if self.fuel_at_lap_start:
             out["fuel_at_lap_start_l"] = {lap: round(v, 1) for lap, v in sorted(self.fuel_at_lap_start.items())}
+        if self.position is not None:
+            out["position"] = self.position
+        if self.num_cars:
+            out["cars_in_race"] = self.num_cars
         if self.start_position:
             out["starting_position"] = self.start_position
-            if self.num_cars:
-                out["cars_in_race"] = self.num_cars
+        if self.position_at_lap_start:
+            out["position_at_lap_start"] = dict(sorted(self.position_at_lap_start.items()))
         pos = self.latest_report("position")
-        out["current_position"] = (
-            f"not in telemetry; driver last said: {pos.value}" if pos else "unknown (GT7 telemetry does not provide it; ask the driver)"
-        )
+        if self.position is None:  # the mode doesn't report it: fall back to what the driver said
+            out["position_note"] = (
+                f"not in telemetry; driver last said: {pos.value}" if pos else "unknown (not in telemetry; ask the driver)"
+            )
         wear = self.latest_report("tyre_wear")
         if wear:
             out["driver_reported_tyre_wear"] = wear.value

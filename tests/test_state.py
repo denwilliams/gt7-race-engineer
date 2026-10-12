@@ -86,15 +86,22 @@ def test_fuel_at_lap_start_after_pit_stop_shows_the_refuel():
     assert store.fuel_at_start_of(4) > store.fuel_at_start_of(3)  # tank is fuller after the stop
 
 
-def test_start_position_is_remembered_after_gt7_stops_reporting_it():
-    store, _ = run_sim(lap_seconds=3, total_laps=3)
-    assert store.car.start_position == -1  # live frames no longer carry it, as in real GT7
+def test_live_position_is_tracked_with_start_and_per_lap_history():
+    store, _ = run_sim(lap_seconds=3, total_laps=5, grid_position=8)
+    assert store.position == 4 and store.num_cars == 12  # 8 on the grid, +1 place per lap, lap 5 now
+    assert store.start_position == 8
+    assert store.position_at_lap_start == {1: 8, 2: 7, 3: 6, 4: 5, 5: 4}
     sm = store.summary()
-    assert sm["starting_position"] == 3 and sm["cars_in_race"] == 12
-    assert "not in telemetry" in sm["current_position"] or "unknown" in sm["current_position"]
+    assert sm["position"] == 4 and sm["cars_in_race"] == 12 and sm["starting_position"] == 8
+    assert "position_note" not in sm  # telemetry has it, no need to ask the driver
 
 
-def test_driver_reported_position_reaches_summary():
-    store, _ = run_sim(lap_seconds=3, total_laps=3)
+def test_prerace_only_mode_falls_back_to_the_driver():
+    store, _ = run_sim(lap_seconds=3, total_laps=3, position_mode="prerace")
+    assert store.car.race_position == -1  # a mode that stops reporting position
+    assert store.start_position == 8  # still remembered from the grid
+    assert "ask the driver" in store.summary()["position_note"]
     store.add_report("position", "P2 at lap 2")
-    assert "P2 at lap 2" in store.summary()["current_position"]
+    assert "P2 at lap 2" in store.summary()["position_note"]
+
+

@@ -42,11 +42,24 @@ def test_update_contents_across_a_race():
 def test_update_burn_trend_and_driver_position():
     store, events = run(lap_seconds=3, total_laps=8, start_fuel=200.0, burn_growth=0.15)
     assert any("Burn rising." in t for _, t in events)
-    store.add_report("position", "P4 at lap 3")
-    assert "You said P4." in lap_update(store, events[-1][0])
+
 
 
 def test_update_is_short():
     _, events = run(lap_seconds=3, total_laps=6, start_fuel=40.0)
     for _, t in events:
         assert len(t.split()) <= 30, t
+
+
+def test_update_reports_position_and_changes():
+    store, events = run(lap_seconds=3, total_laps=5, grid_position=8)
+    first = events[0][1]  # lap 2 starting: 8 -> 7
+    assert "Position seven, up one." in first
+    assert all("Position" in t for _, t in events)
+
+
+def test_update_without_telemetry_position_uses_driver_report():
+    store, events = run(lap_seconds=7, total_laps=4, position_mode="prerace")  # laps longer than the 5 s expiry
+    assert not any("Position" in t for _, t in events)
+    store.add_report("position", "P4 at lap 3")
+    assert "You said P4." in lap_update(store, events[-1][0])

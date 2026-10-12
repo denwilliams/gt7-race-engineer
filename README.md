@@ -108,7 +108,7 @@ Optional. Without one, analysts use built-in threshold rules. Three ways to plug
 
 ## Telemetry limits
 
-GT7 telemetry covers the player's own car (fuel, speeds, temperatures, lap times, lap counts). It does not provide live race position, gaps to other cars, rivals or flags (the position and car-count fields are pre-race values), and it does not report tyre wear (the driver reports it by voice instead).
+GT7 telemetry covers the player's own car (fuel, speeds, temperatures, lap times, lap counts). The race position and car-count fields are documented as pre-race values, but real GT7 telemetry shows them updating live, so they are used as current position. It does not provide gaps to other cars, rivals or flags, and it does not report tyre wear (the driver reports it by voice instead; the same voice report is the fallback for position in modes that don't send it).
 
 ## Non-goals (for now)
 

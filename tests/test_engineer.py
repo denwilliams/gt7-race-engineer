@@ -202,7 +202,7 @@ async def test_driver_position_is_stored_and_acknowledged():
     eng = RaceEngineer(store, bus, FakeClient("ok"), speak)
     await eng.on_driver("I'm P4 right now")
     assert said == ["Copy, P4."]
-    assert "P4" in store.summary()["current_position"]
+    assert store.latest_report("position").value.startswith("P4")
     await eng.on_driver("what position am I in?")  # a question goes to the model, not stored
     assert store.latest_report("position").value.startswith("P4")
 

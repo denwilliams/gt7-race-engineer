@@ -20,10 +20,14 @@ async def frames(
     realtime: bool = True,
     burn_growth: float = 0.0,
     refuel_lap: int | None = None,
+    grid_position: int = 8,
+    position_mode: str = "live",
 ) -> AsyncIterator[Frame]:
     """Yield frames for a short race. Lap times wobble so pace agents have
     something to chew on. Fuel burn is steady unless burn_growth (fractional
-    increase per lap) is set; refuel_lap adds a mid-lap refuel to full."""
+    increase per lap) is set; refuel_lap adds a mid-lap refuel to full. Position
+    starts at grid_position and gains one place per lap ("live", what a real PS5
+    reports); "prerace" reports it only before the start, as the GT7 docs say."""
     dt = 1.0 / TICK_HZ
     t = 0.0
     packet_id = 0
@@ -57,8 +61,10 @@ async def frames(
                 total_laps=total_laps,
                 best_lap_ms=best,
                 last_lap_ms=last,
-                start_position=3 if packet_id <= 30 else -1,  # GT7: -1 once the race has started
-                num_cars=12 if packet_id <= 30 else -1,
+                race_position=(
+                    max(1, grid_position - (lap - 1)) if position_mode == "live" else (grid_position if packet_id <= 30 else -1)
+                ),
+                num_cars=12 if position_mode == "live" or packet_id <= 30 else -1,
                 flags=FLAG_ON_TRACK,
                 gear=3 + int(2 * (corner + 1) / 2),
                 throttle=max(0.0, corner),

@@ -43,8 +43,8 @@ class Frame:
     total_laps: int  # 0 for timed races
     best_lap_ms: int  # -1 if none
     last_lap_ms: int  # -1 if none
-    start_position: int
-    num_cars: int
+    race_position: int  # 0x84. Documented as the pre-race start position, but real GT7 shows the LIVE position
+    num_cars: int  # 0x86. Cars in the race; -1 when the mode doesn't report it
     flags: int
     gear: int
     throttle: float  # 0..1
@@ -96,7 +96,7 @@ def decode(plain: bytes, t: float = 0.0) -> Frame:
         total_laps=u("<h", plain, 0x76)[0],
         best_lap_ms=u("<i", plain, 0x78)[0],
         last_lap_ms=u("<i", plain, 0x7C)[0],
-        start_position=u("<h", plain, 0x84)[0],
+        race_position=u("<h", plain, 0x84)[0],
         num_cars=u("<h", plain, 0x86)[0],
         flags=u("<h", plain, 0x8E)[0],
         gear=u("<B", plain, 0x90)[0] & 0x0F,
@@ -129,7 +129,7 @@ def encode_packet(f: Frame, iv1: int = 0x1234ABCD) -> bytes:
     p("<h", b, 0x76, f.total_laps)
     p("<i", b, 0x78, f.best_lap_ms)
     p("<i", b, 0x7C, f.last_lap_ms)
-    p("<h", b, 0x84, f.start_position)
+    p("<h", b, 0x84, f.race_position)
     p("<h", b, 0x86, f.num_cars)
     p("<h", b, 0x8E, f.flags)
     p("<B", b, 0x90, f.gear & 0x0F)

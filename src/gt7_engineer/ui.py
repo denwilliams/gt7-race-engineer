@@ -143,10 +143,13 @@ class RichUI:
             sm = self.store.summary()
             laps = f"{car.lap} / {car.total_laps}" if car.total_laps else f"{car.lap}"
             t.add_row("Lap", laps)
-            grid = f"P{sm['starting_position']}" + (f" of {sm['cars_in_race']}" if sm.get("cars_in_race") else "") if sm.get("starting_position") else "?"
-            now_pos = sm.get("current_position", "")
-            now_pos = now_pos.split("driver last said: ")[1] if "driver last said" in now_pos else "n/a (not in GT7 telemetry)"
-            t.add_row("Position", f"start {grid}   now {now_pos}")
+            if sm.get("position"):
+                pos = f"P{sm['position']}" + (f" of {sm['cars_in_race']}" if sm.get("cars_in_race") else "")
+                if sm.get("starting_position"):
+                    pos += f"   (started P{sm['starting_position']})"
+            else:
+                pos = "n/a  " + sm.get("position_note", "").split("driver last said: ")[-1]
+            t.add_row("Position", pos)
             t.add_row("Speed", f"{sm['speed_kph']} km/h   gear {car.gear}   {car.rpm:.0f} rpm")
             t.add_row("Throttle", _bar(car.throttle, "green") + "   Brake " + _bar(car.brake, "red"))
             fuel = f"{sm['fuel_l']} L"

@@ -98,7 +98,14 @@ def lap_update(store: StateStore, event: NewLap) -> str:
     elif car is not None and car.fuel_capacity:
         parts.append(f"Fuel {say_int(round(car.fuel))} litres.")
 
-    pos = store.latest_report("position")
-    if pos and car is not None and car.t - pos.t < 4 * 90:  # reported within roughly the last few laps
-        parts.append(f"You said {pos.value.split(' at lap')[0]}.")
+    if store.position is not None and car is not None:
+        text = f"Position {say_int(store.position)}"
+        prev = store.position_at_lap_start.get(car.lap - 1)  # where you were when the last lap began
+        if prev is not None and prev != store.position:
+            text += f", {'up' if store.position < prev else 'down'} {say_int(abs(prev - store.position))}"
+        parts.append(text + ".")
+    else:  # the mode doesn't report position: use what the driver said, if recent
+        said = store.latest_report("position")
+        if said and car is not None and car.t - said.t < 4 * 90:
+            parts.append(f"You said {said.value.split(' at lap')[0]}.")
     return " ".join(parts)
