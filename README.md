@@ -72,6 +72,7 @@ PS5 --UDP--> Telemetry ingest (decrypt/decode)
 ```
 
 - **State store.** Current car and race state, plus a ring buffer of frames so any agent can look back (e.g. fuel burn over the last 3 laps).
+- **Fuel burn tracking.** Fuel burnt on each completed lap is tracked, with a trend (heavier, lighter or steady) from a least-squares slope over the last 5 laps (needs 3). The fuel analyst uses it alongside the average, and it's in the engineer's state, so "is my burn getting worse?" gets a real answer. Pit-stop laps (fuel level rising) are excluded from the stats.
 - **Analyst agents.** Run continuously and independently, each publishing timestamped assessments. Each has two stages: calculate parameters (fuel burn per lap, pace delta), then a local decision model picks from a fixed set of answers (e.g. `ignore / mention / urgent`) given those numbers and instructions. Only "mention" and "urgent" reach the engineer.
 - **Lap-trace agent.** At the end of each lap, a chat LLM reviews that lap's telemetry and publishes a coaching assessment.
 - **Race engineer.** The only voice. Receives all assessments and rate-limits, prioritises and decides when to speak. Answers the driver and is pinged at each new lap for an update.

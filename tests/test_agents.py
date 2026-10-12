@@ -118,3 +118,14 @@ def test_jev_decision_falls_back_on_error():
     http = httpx.AsyncClient(base_url="https://x/api", transport=httpx.MockTransport(lambda r: httpx.Response(500)))
     jev = JevDecision(ModelConfig(kind="jev"), "ignore", http)
     assert asyncio.run(jev.decide("x", {}, CHOICES)) == "ignore"
+
+
+def test_fuel_agent_reports_heavier_burn():
+    store, bus = StateStore(), Bus()
+    fuel = FuelAgent(store, bus, ThresholdDecision(fuel_rule))
+    drive(store, [fuel], lap_seconds=3, total_laps=8, start_fuel=60.0, fuel_per_lap=5.0, burn_growth=0.15)
+    msgs = drain(bus)
+    assert msgs, "thin margin plus heavier burn should be worth a mention"
+    last = msgs[-1]
+    assert last.data["burn_trend"] == "heavier" and last.data["burn_change_per_lap_l"] > 0
+    assert "getting heavier" in last.message and "last lap" in last.message

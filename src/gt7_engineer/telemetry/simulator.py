@@ -18,9 +18,12 @@ async def frames(
     fuel_per_lap: float = 7.0,
     start_fuel: float = 40.0,
     realtime: bool = True,
+    burn_growth: float = 0.0,
+    refuel_lap: int | None = None,
 ) -> AsyncIterator[Frame]:
     """Yield frames for a short race. Lap times wobble so pace agents have
-    something to chew on; fuel burn is steady with the pace."""
+    something to chew on. Fuel burn is steady unless burn_growth (fractional
+    increase per lap) is set; refuel_lap adds a mid-lap refuel to full."""
     dt = 1.0 / TICK_HZ
     t = 0.0
     packet_id = 0
@@ -29,11 +32,14 @@ async def frames(
     for lap in range(1, total_laps + 1):
         this_lap = lap_seconds * (1.0 + 0.04 * math.sin(lap * 1.7)) / speedup
         ticks = int(this_lap * TICK_HZ)
+        lap_burn = fuel_per_lap * (1.0 + burn_growth) ** (lap - 1)
         for i in range(ticks):
             phase = i / ticks
             corner = math.sin(phase * 2 * math.pi * 4)
             speed = 55 + 25 * corner  # m/s
-            fuel -= fuel_per_lap / ticks
+            fuel -= lap_burn / ticks
+            if lap == refuel_lap and i == ticks // 2:
+                fuel = start_fuel
             packet_id += 1
             yield Frame(
                 t=t,

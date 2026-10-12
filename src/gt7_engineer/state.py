@@ -9,6 +9,8 @@ from .telemetry.packet import Frame
 
 FRAME_HZ = 60
 HISTORY_SECONDS = 600
+REFUEL_JUMP_L = 0.5  # a rise in fuel level bigger than this between frames means a pit stop
+TREND_STEADY_PCT = 3.0  # burn changes smaller than this per lap count as steady
 
 
 @dataclass(slots=True)
@@ -17,6 +19,7 @@ class LapRecord:
     time_ms: int  # as reported by the game; -1 if unknown
     fuel_used: float
     frames: list[Frame] = field(repr=False, default_factory=list)
+    burn_valid: bool = True  # False if the car refuelled during the lap (pit stop)
 
 
 @dataclass(slots=True)
@@ -41,6 +44,7 @@ class StateStore:
         self.car: Frame | None = None
         self._lap_frames: list[Frame] = []
         self._lap_start_fuel: float | None = None
+        self._refuelled = False
 
     # ---- ingest -------------------------------------------------------
     def update(self, f: Frame) -> NewLap | None:
@@ -53,11 +57,14 @@ class StateStore:
             done = self._lap_frames
             time_ms = f.last_lap_ms
             fuel_used = max(0.0, (self._lap_start_fuel or done[0].fuel) - done[-1].fuel)
-            rec = LapRecord(done[-1].lap, time_ms, fuel_used, done)
+            rec = LapRecord(done[-1].lap, time_ms, fuel_used, done, burn_valid=not self._refuelled)
             self.laps.append(rec)
             event = NewLap(rec)
             self._lap_frames = []
             self._lap_start_fuel = None
+            self._refuelled = False
+        if self._lap_frames and f.fuel > self._lap_frames[-1].fuel + REFUEL_JUMP_L:
+            self._refuelled = True
         if self._lap_start_fuel is None:
             self._lap_start_fuel = f.fuel
         self._lap_frames.append(f)
@@ -99,10 +106,36 @@ class StateStore:
         return self.car.best_lap_ms if self.car else -1
 
     @property
+    def burns(self) -> list[float]:
+        """Fuel burnt on each of the last 5 completed laps (litres), excluding pit-stop laps."""
+        return [l.fuel_used for l in list(self.laps)[-5:] if l.burn_valid and l.fuel_used > 0]
+
+    @property
+    def last_lap_burn(self) -> float | None:
+        b = self.burns
+        return b[-1] if b else None
+
+    @property
     def fuel_per_lap(self) -> float | None:
-        """Mean fuel burn over the last few completed laps."""
-        laps = [l.fuel_used for l in list(self.laps)[-3:] if l.fuel_used > 0]
-        return sum(laps) / len(laps) if laps else None
+        """Mean fuel burn over the last few valid laps."""
+        b = self.burns[-3:]
+        return sum(b) / len(b) if b else None
+
+    @property
+    def burn_trend(self) -> tuple[float, str] | None:
+        """(change in burn per lap in litres, 'heavier' | 'lighter' | 'steady').
+
+        Least-squares slope over the last up to 5 valid laps; needs at least 3.
+        """
+        b = self.burns
+        if len(b) < 3:
+            return None
+        n = len(b)
+        xm, ym = (n - 1) / 2, sum(b) / n
+        slope = sum((i - xm) * (y - ym) for i, y in enumerate(b)) / sum((i - xm) ** 2 for i in range(n))
+        if abs(slope) / ym * 100 < TREND_STEADY_PCT:
+            return slope, "steady"
+        return slope, "heavier" if slope > 0 else "lighter"
 
     @property
     def laps_remaining(self) -> int | None:
@@ -130,6 +163,9 @@ class StateStore:
         }
         if fpl and fpl > 0:
             out["laps_of_fuel"] = round(c.fuel / fpl, 1)
+        out["fuel_burn_last_laps_l"] = [round(x, 2) for x in self.burns]
+        if (trend := self.burn_trend) is not None:
+            out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L per lap each lap)"
         wear = self.latest_report("tyre_wear")
         if wear:
             out["driver_reported_tyre_wear"] = wear.value
