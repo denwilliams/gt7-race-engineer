@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 
 from . import app, config, ui
 from .audio.tts import PrintTTS, make_tts
+from .recorder import Recorder
 from .state import NewRace, StateStore
 from .telemetry import ingest, simulator
 from .telemetry.stats import IngestStats
@@ -86,9 +87,11 @@ async def _run(args) -> None:
     ui.attach(stats=stats, info=info)
     reset_request = asyncio.Event()
     _start_keys(reset_request)
+    recorder = Recorder(args.record) if args.record else None
     await app.run(
         cfg, _source(args, cfg, stats), speak, utterances, use_llm=not args.no_llm, speaking=speaking,
         stop_speaking=stop_speaking, interrupter=interrupter, stats=stats, reset_request=reset_request,
+        recorder=recorder,
     )
 
 
@@ -133,6 +136,7 @@ def main() -> None:
     p.add_argument("--text", action="store_true", help="type to the engineer and print replies (no mic/speaker)")
     p.add_argument("--no-audio", action="store_true", help="print only (simulate mode)")
     p.add_argument("--no-llm", action="store_true", help="no language model: rule-based calls only")
+    p.add_argument("--record", metavar="FILE", help="write telemetry to a JSONL file for offline analysis")
     p.add_argument("--plain", action="store_true", help="plain text lines instead of the live dashboard")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()

@@ -199,6 +199,7 @@ class RichUI:
             sm = self.store.summary()
             laps = f"{car.lap} / {car.total_laps}" if car.total_laps else f"{car.lap}"
             t.add_row("Lap", laps)
+            t.add_row("[dim]Raw[/]", f"[dim]lap {car.lap}  flags 0x{car.flags & 0xFFFF:04x}  {'on track' if car.on_track else 'NOT on track'}[/]")
             if sm.get("position"):
                 pos = f"P{sm['position']}" + (f" of {sm['cars_in_race']}" if sm.get("cars_in_race") else "")
                 if sm.get("starting_position"):
@@ -270,7 +271,7 @@ class RichUI:
 
         now = time.monotonic()
         height = self.console.size.height
-        top = 16
+        top = 17
         root = Layout()
         root.split_column(Layout(name="top", size=top), Layout(name="log"))
         root["top"].split_row(Layout(self._telemetry_panel(now), ratio=3), Layout(self._status_panel(), ratio=2))

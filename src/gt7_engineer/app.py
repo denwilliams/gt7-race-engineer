@@ -45,6 +45,7 @@ async def run(
     interrupter: Interrupter | None = None,
     stats: IngestStats | None = None,
     reset_request: asyncio.Event | None = None,
+    recorder=None,
 ) -> StateStore:
     store, bus = StateStore(), Bus()
     stats = stats if stats is not None else IngestStats()
@@ -87,7 +88,13 @@ async def run(
     def spawn(coro) -> None:
         t = asyncio.create_task(coro)
         background.add(t)
-        t.add_done_callback(background.discard)
+
+        def done(task: asyncio.Task) -> None:
+            background.discard(task)
+            if not task.cancelled() and task.exception() is not None:  # never fail silently
+                log.error("background task failed: %r", task.exception(), exc_info=task.exception())
+
+        t.add_done_callback(done)
 
     heard: asyncio.Queue[str] = asyncio.Queue()
 
@@ -108,9 +115,19 @@ async def run(
         tasks.append(asyncio.create_task(listen()))
         tasks.append(asyncio.create_task(respond()))
 
+    last_lap_seen = None
     try:
         async for frame in source:
             stats.frame()
+            if recorder is not None:
+                recorder.write(frame)
+            if frame.lap != last_lap_seen:  # what the game says, before any of our logic touches it
+                ui.log(
+                    "system",
+                    f"lap counter {last_lap_seen} -> {frame.lap} (on track: {frame.on_track}, flags 0x{frame.flags & 0xFFFF:04x}, "
+                    f"last lap {frame.last_lap_ms} ms)",
+                )
+                last_lap_seen = frame.lap
             if reset_request is not None and reset_request.is_set():  # the driver asked (keyboard)
                 reset_request.clear()
                 store.reset()

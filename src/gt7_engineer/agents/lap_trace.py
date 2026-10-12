@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import re
 
 from ..bus import MENTION, Assessment, Bus
 from ..llm import MAX_REPLY_TOKENS, ChatClient
@@ -40,6 +41,14 @@ def trace(frames: list[Frame], buckets: int = 20) -> list[dict]:
     return out[:buckets]
 
 
+_NON_ANSWER = re.compile(r"\s*(nothing notable|no (clear|notable|significant|obvious|major)|nothing (stands|to))", re.I)
+
+
+def is_non_answer(text: str) -> bool:
+    """The model's way of saying 'nothing to report' (it doesn't always use the exact words asked for)."""
+    return not text or bool(_NON_ANSWER.match(text))
+
+
 def fastest(laps, exclude: LapRecord) -> LapRecord | None:
     timed = [l for l in laps if l is not exclude and l.time_ms > 0]
     return min(timed, key=lambda l: l.time_ms) if timed else None
@@ -67,7 +76,7 @@ class LapTraceAgent:
         except Exception as e:
             log.warning("lap review failed: %s", e)
             return
-        if "nothing notable" in text.lower():
+        if is_non_answer(text):
             return
         t = self.store.car.t if self.store.car else 0.0
         self.bus.publish(Assessment(self.name, "coaching", MENTION, text, {"lap": event.record.lap}, t))
