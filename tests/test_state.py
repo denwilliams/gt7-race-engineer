@@ -105,3 +105,28 @@ def test_prerace_only_mode_falls_back_to_the_driver():
     assert "P2 at lap 2" in store.summary()["position_note"]
 
 
+
+
+def test_summary_has_formatted_lap_times_and_fuel_burned():
+    store, _ = run_sim(lap_seconds=3, total_laps=5, start_fuel=40.0, fuel_per_lap=7.0)
+    sm = store.summary()
+    assert "last_lap_ms" not in sm and "best_lap_ms" not in sm  # raw ms invite conversion mistakes
+    assert sm["last_lap_time"].startswith("0:0") and sm["best_lap_time"].startswith("0:0")
+    assert isinstance(sm["last_lap_vs_best_s"], float)
+    assert sm["fuel_at_race_start_l"] == 40.0
+    # burned so far = start - now, whatever the lap
+    assert abs(sm["fuel_burned_total_l"] - (40.0 - sm["fuel_l"])) < 0.3
+
+
+def test_fuel_burned_total_counts_through_a_pit_stop():
+    store, _ = run_sim(lap_seconds=3, total_laps=6, start_fuel=40.0, fuel_per_lap=7.0, refuel_lap=3)
+    sm = store.summary()
+    # the refuel (back to full) must not reduce what was burned: 5.x laps at 7 L each
+    assert sm["fuel_burned_total_l"] > 33.0
+    assert sm["fuel_burned_total_l"] > 40.0 - sm["fuel_l"] + 5.0  # more than the naive start-minus-now
+
+
+def test_fuel_used_this_lap_so_far():
+    store, _ = run_sim(lap_seconds=3, total_laps=3, start_fuel=40.0, fuel_per_lap=7.0)
+    used = store.summary()["fuel_used_this_lap_so_far_l"]
+    assert 0 <= used <= 7.5

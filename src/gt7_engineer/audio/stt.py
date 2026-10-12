@@ -16,6 +16,11 @@ from .. import ui
 log = logging.getLogger(__name__)
 
 SAMPLE_RATE = 16000
+# Whisper copies the style and vocabulary of this prompt, which cuts mishearings of racing terms.
+RACING_PROMPT = (
+    "Race engineer radio, Gran Turismo 7. Fuel, fuel burned, fuel remaining, tyres, tyre wear, lap time, "
+    "best lap, last lap, laps remaining, pit stop, box, position, gap, brake, throttle, understeer, oversteer."
+)
 BLOCK = 1600  # 100 ms
 MIN_THRESHOLD = 0.004  # RMS floor; laptop mics are quiet (ambient ~0.001, speech 0.01-0.05)
 NOISE_MULTIPLE = 4.0  # speech must be this many times louder than the measured room noise
@@ -185,7 +190,9 @@ class WhisperListener:
     def _transcribe(self, audio) -> str:
         import mlx_whisper
 
-        out = mlx_whisper.transcribe(audio, path_or_hf_repo=self.model, language="en")
+        out = mlx_whisper.transcribe(
+            audio, path_or_hf_repo=self.model, language="en", initial_prompt=RACING_PROMPT
+        )
         return out["text"].strip()
 
 

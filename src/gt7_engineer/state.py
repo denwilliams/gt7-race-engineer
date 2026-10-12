@@ -6,6 +6,7 @@ from collections import deque
 from dataclasses import dataclass, field
 
 from .telemetry.packet import Frame
+from .timefmt import fmt_lap
 
 FRAME_HZ = 60
 HISTORY_SECONDS = 600
@@ -58,6 +59,8 @@ class StateStore:
         self._lap_frames: list[Frame] = []
         self._lap_start_fuel: float | None = None
         self._refuelled = False
+        self._prev_fuel: float | None = None
+        self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
         self.fuel_at_lap_start: dict[int, float] = {}  # lap number -> litres when it began (whole race)
         self._position: int | None = None  # last position reported by telemetry
         self._position_t = 0.0
@@ -99,6 +102,9 @@ class StateStore:
                 self.start_position = f.race_position
         if not f.on_track:
             return None
+        if self._prev_fuel is not None and f.fuel < self._prev_fuel:
+            self._fuel_burned += self._prev_fuel - f.fuel
+        self._prev_fuel = f.fuel
         if self._lap_frames and f.lap < self._lap_frames[-1].lap:
             return None  # a lap number going backwards is a glitch (or a new race, handled before this): skip it
         event = None
@@ -224,8 +230,9 @@ class StateStore:
             "fuel_l": round(c.fuel, 1),
             "fuel_pct": round(100 * c.fuel / c.fuel_capacity) if c.fuel_capacity else None,
             "fuel_per_lap_l": round(fpl, 2) if fpl else None,
-            "best_lap_ms": c.best_lap_ms if c.best_lap_ms > 0 else None,
-            "last_lap_ms": c.last_lap_ms if c.last_lap_ms > 0 else None,
+            # formatted as m:ss.mmm so the model reads them instead of converting raw milliseconds
+            "last_lap_time": fmt_lap(c.last_lap_ms) if c.last_lap_ms > 0 else None,
+            "best_lap_time": fmt_lap(c.best_lap_ms) if c.best_lap_ms > 0 else None,
             "tyre_temp_c": [round(x) for x in c.tyre_temp],
         }
         if (left := self.laps_remaining) is not None:
@@ -238,6 +245,14 @@ class StateStore:
         out["fuel_burn_last_laps_l"] = [round(x, 2) for x in self.burns]
         if (trend := self.burn_trend) is not None:
             out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L/lap every lap)"
+        if c.last_lap_ms > 0 and c.best_lap_ms > 0:
+            out["last_lap_vs_best_s"] = round((c.last_lap_ms - c.best_lap_ms) / 1000, 2)  # + slower, - faster
+        if self.fuel_at_lap_start:
+            out["fuel_at_race_start_l"] = round(self.fuel_at_lap_start[min(self.fuel_at_lap_start)], 1)
+        if self._fuel_burned > 0:
+            out["fuel_burned_total_l"] = round(self._fuel_burned, 1)
+        if self._lap_start_fuel is not None and not self._refuelled:
+            out["fuel_used_this_lap_so_far_l"] = round(max(0.0, self._lap_start_fuel - c.fuel), 1)
         if self.fuel_at_lap_start:
             out["fuel_at_lap_start_l"] = {lap: round(v, 1) for lap, v in sorted(self.fuel_at_lap_start.items())}
         if self.position is not None:

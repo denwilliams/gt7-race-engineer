@@ -12,6 +12,8 @@ from collections import deque
 from collections.abc import Callable
 from dataclasses import dataclass
 
+from .timefmt import fmt_lap  # noqa: F401  (re-exported: ui.fmt_lap)
+
 # kind -> (icon, rich style, plain label)
 KINDS = {
     "engineer": ("🎙", "bold cyan", "ENGINEER"),
@@ -21,13 +23,6 @@ KINDS = {
     "system": ("•", "white", ""),
     "warn": ("⚠", "bold red", "warning"),
 }
-
-
-def fmt_lap(ms: int | None) -> str:
-    if not ms or ms <= 0:
-        return "-"
-    m, s = divmod(ms / 1000, 60)
-    return f"{int(m)}:{s:06.3f}"
 
 
 class KeyListener:
