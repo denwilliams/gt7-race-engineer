@@ -1,7 +1,7 @@
 """Text-to-speech, selected by `[tts] engine` in config.toml.
 
 - say:    macOS `say` command. Zero setup, robotic.
-- qwen3:  Qwen3-TTS 0.6B CustomVoice via mlx-audio. Streams, style-controllable.
+- qwen3:  Qwen3-TTS 0.6B CustomVoice via mlx-audio. Streams. The 0.6B model ignores or is slowed by `instruct`; only 1.7B models are meant to follow it.
 - kokoro: Kokoro-82M via mlx-audio. Very fast.
 
 Add an engine by implementing `speak(text)` (and optionally `warmup()`).
@@ -51,7 +51,7 @@ ENGINE_DEFAULTS = {
     "qwen3": {
         "model": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",
         "voice": "Ryan",
-        "instruct": "Calm, steady and reassuring, like a veteran race engineer speaking on the radio.",
+        "instruct": "",
     },
     "kokoro": {"model": "mlx-community/Kokoro-82M-bf16", "voice": "am_adam", "instruct": ""},
 }
@@ -145,7 +145,7 @@ class MLXTTS:
         m = self._load()
         if self.engine == "qwen3":
             gen = m.generate_custom_voice(
-                text=text, speaker=self.voice, language="English", instruct=self.instruct,
+                text=text, speaker=self.voice, language="English", instruct=self.instruct or None,
                 stream=True, streaming_interval=self.streaming_interval,
             )
         else:

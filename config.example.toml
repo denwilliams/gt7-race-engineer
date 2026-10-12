@@ -9,7 +9,7 @@ engine = "qwen3"
 # voice = "Ryan"        # say: `say -v ?`; kokoro: "am_adam", "af_heart", ...; qwen3: "Ryan", "Vivian", "Serena", ...
 # model = "..."         # Hugging Face repo id, to use another size/quantisation
 # speed = 1.0           # kokoro speed multiplier; say rate scale; ignored by qwen3
-# instruct = "..."      # qwen3 only: speaking style
+# instruct = "..."      # qwen3 only, leave unset: the 0.6B model does not follow it (and may slow speech); only 1.7B models do
 
 # Any OpenAI-compatible endpoint: LM Studio (:1234), Ollama (:11434/v1), ...
 [engineer]
