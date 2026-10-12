@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import math
+import statistics
 from collections import deque
 from dataclasses import dataclass, field
 
@@ -17,6 +19,18 @@ MIN_ESTIMATE_S = 20.0  # observed running time needed before burn-rate extrapola
 TREND_STEADY_PCT = 3.0  # burn changes smaller than this per lap count as steady
 
 
+def _game_dt(a: Frame, b: Frame) -> float:
+    """Game time between two frames, from GT7's own packet counter (60 per second).
+
+    Receive time is wrong after packet loss or a stall: 12 lost packets arrive as one big step in
+    almost no wall time. Falls back to receive time if the counter looks unusable.
+    """
+    n = b.packet_id - a.packet_id
+    if 0 < n <= 600:
+        return n / 60.0
+    return max(0.0, b.t - a.t)
+
+
 @dataclass(slots=True)
 class LapRecord:
     lap: int
@@ -25,6 +39,8 @@ class LapRecord:
     frames: list[Frame] = field(repr=False, default_factory=list)
     burn_valid: bool = True  # False if the car refuelled during the lap (pit stop)
     fuel_start: float = 0.0  # fuel level (litres) when the lap began
+    distance_m: float = 0.0  # path length driven this lap (from position changes)
+    distance_ok: bool = False  # False if we joined mid-lap or the car was teleported (pit box, respawn)
 
 
 @dataclass(slots=True)
@@ -64,6 +80,9 @@ class StateStore:
         self._prev_fuel: float | None = None
         self._lap_min_fuel = float("inf")  # lowest fuel level seen this lap (to tell refuels from jitter)
         self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
+        self._lap_dist = 0.0  # metres driven so far this lap
+        self._lap_dist_ok = True  # False once a teleport is seen this lap
+        self._race_start_fuel: float | None = None  # fuel on the grid, before the race's first line crossing
         self._joined: tuple[int, float] | None = None  # (lap, fuel) of the first frame we saw
         self._observed_s = 0.0  # running time we have actually watched (for the burn-rate estimate)
         self._prev_t: float | None = None
@@ -125,6 +144,13 @@ class StateStore:
         # a small rise is jitter: keep the lower baseline so the same litres are not counted twice
         if self._lap_frames and not (self._lap_frames[-1].lap <= f.lap <= self._lap_frames[-1].lap + 1):
             return None  # lap numbers only ever go up by one: anything else is a glitch (or a new race, handled before)
+        step, jumped = 0.0, False
+        if self._lap_frames:  # distance since the previous frame, ignoring teleports (pit box, respawn)
+            prev = self._lap_frames[-1]
+            step = math.dist(prev.position, f.position)
+            expected = prev.speed * _game_dt(prev, f)
+            if step > max(5.0, 3 * expected + 3.0):
+                step, jumped = expected, True
         event = None
         if self._lap_frames and f.lap > self._lap_frames[-1].lap and f.lap > 1:
             done = self._lap_frames
@@ -133,6 +159,7 @@ class StateStore:
             rec = LapRecord(
                 done[-1].lap, time_ms, fuel_used, done, burn_valid=not self._refuelled and not self._lap_partial,
                 fuel_start=self._lap_start_fuel or done[0].fuel,
+                distance_m=self._lap_dist, distance_ok=self._lap_dist_ok and not self._lap_partial,
             )
             self.laps.append(rec)
             event = NewLap(rec)
@@ -141,13 +168,28 @@ class StateStore:
             self._lap_min_fuel = float("inf")
             self._refuelled = False
             self._lap_partial = False  # every lap after a line crossing we saw is complete
+            self._lap_dist, self._lap_dist_ok = 0.0, True
+        elif self._lap_frames and f.lap > self._lap_frames[-1].lap:
+            # Lap 0 -> 1: the race itself starts at the line. What came before was the run-up, not a lap.
+            if not self._lap_partial:
+                self._race_start_fuel = self._lap_start_fuel
+            self._lap_frames = []
+            self._lap_start_fuel = None
+            self._lap_min_fuel = float("inf")
+            self._refuelled = False
+            self._lap_partial = False
+            self._lap_dist, self._lap_dist_ok = 0.0, True
+            step, jumped = 0.0, False
+        self._lap_dist += step
+        if jumped:
+            self._lap_dist_ok = False
         if self._lap_frames and f.fuel > self._lap_min_fuel + REFUEL_JUMP_L:
             self._refuelled = True
         self._lap_min_fuel = min(self._lap_min_fuel, f.fuel)
         if self._lap_start_fuel is None:
             self._lap_start_fuel = f.fuel
             if self._lap_partial is None:  # first lap we see: complete only if it starts from the grid
-                self._lap_partial = not (f.lap <= 1 and f.speed < 2.0)
+                self._lap_partial = not (f.lap == 0 or (f.lap == 1 and f.speed < 2.0))  # grid/run-up, or a standing start
         if f.lap >= 1 and not self._lap_partial and f.lap not in self.fuel_at_lap_start:
             self.fuel_at_lap_start[f.lap] = f.fuel  # first frame seen with this lap number
             if self.position is not None:
@@ -169,6 +211,23 @@ class StateStore:
         if self._position is None or self.car is None or self.car.t - self._position_t > POSITION_STALE_S:
             return None
         return self._position
+
+    @property
+    def lap_length_m(self) -> float | None:
+        """Typical lap length: the median of the clean complete laps (pit/teleport laps don't skew it)."""
+        good = [l.distance_m for l in self.laps if l.distance_ok and l.distance_m > 100]
+        return statistics.median(good) if good else None
+
+    @property
+    def lap_distance_so_far_m(self) -> float | None:
+        """Metres driven on the current lap; None if we don't know where the lap began."""
+        return self._lap_dist if self.car is not None and self.car.lap >= 1 and not self._lap_partial and self._lap_dist_ok else None
+
+    @property
+    def lap_progress(self) -> float | None:
+        """Fraction (0..1) of the current lap driven, by distance. Approximate: needs one clean complete lap."""
+        length, done = self.lap_length_m, self.lap_distance_so_far_m
+        return None if not length or done is None else max(0.0, min(1.0, done / length))
 
     @property
     def lap(self) -> int:
@@ -287,10 +346,12 @@ class StateStore:
             out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L/lap every lap)"
         if c.last_lap_ms > 0 and c.best_lap_ms > 0:
             out["last_lap_vs_best_s"] = round((c.last_lap_ms - c.best_lap_ms) / 1000, 2)  # + slower, - faster
-        # Fuel at the race start. If we joined mid-race we never saw it, so assume a full tank (races start full).
+        # Fuel at the race start: seen on the grid, else at the first line crossing, else assume a full tank.
         start = None
         assumed = False
-        if 1 in self.fuel_at_lap_start:
+        if self._race_start_fuel is not None:
+            start = self._race_start_fuel
+        elif 1 in self.fuel_at_lap_start:
             start = self.fuel_at_lap_start[1]
         elif self._joined is not None and c.fuel_capacity > 0:
             start, assumed = c.fuel_capacity, True
@@ -309,6 +370,11 @@ class StateStore:
             out["fuel_used_this_lap_so_far_l"] = round(max(0.0, self._lap_start_fuel - c.fuel), 1)
         if self.fuel_at_lap_start:
             out["fuel_at_lap_start_l"] = {lap: round(v, 1) for lap, v in sorted(self.fuel_at_lap_start.items())}
+        if (length := self.lap_length_m) is not None:
+            out["lap_length_m"] = round(length)
+            if (prog := self.lap_progress) is not None:
+                out["lap_progress_pct"] = round(100 * prog)
+                out["lap_distance_so_far_m"] = round(self._lap_dist)
         if self.position is not None:
             out["position"] = self.position
         if self.num_cars:

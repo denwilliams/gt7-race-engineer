@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import socket
 import time
 from collections.abc import AsyncIterator
 
@@ -14,6 +15,7 @@ log = logging.getLogger(__name__)
 
 SEND_PORT = 33739  # console listens here for the heartbeat
 RECV_PORT = 33740  # console sends telemetry here
+RCVBUF_BYTES = 4 * 1024 * 1024
 HEARTBEAT = b"A"
 HEARTBEAT_EVERY = 1.5  # seconds; GT7 stops sending after ~10s of silence
 
@@ -33,9 +35,13 @@ async def frames(
 ) -> AsyncIterator[Frame]:
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=600)
-    transport, _ = await loop.create_datagram_endpoint(
-        lambda: _Protocol(queue), local_addr=("0.0.0.0", recv_port)
-    )
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    # The default buffer holds ~30 packets (half a second); a 0.2 s stall in this process then
+    # silently drops a dozen. Ask for 4 MB (minutes of telemetry).
+    sock.setsockopt(socket.SOL_SOCKET, socket.SO_RCVBUF, RCVBUF_BYTES)
+    sock.bind(("0.0.0.0", recv_port))
+    sock.setblocking(False)
+    transport, _ = await loop.create_datagram_endpoint(lambda: _Protocol(queue), sock=sock)
 
     async def heartbeat() -> None:
         while True:

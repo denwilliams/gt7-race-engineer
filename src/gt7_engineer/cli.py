@@ -127,7 +127,7 @@ async def _watch(args) -> None:
     reset_request = asyncio.Event()
     _start_keys(reset_request)
     async for f in _source(args, cfg, stats):
-        stats.frame()
+        stats.frame(f.packet_id)
         if reset_request.is_set():
             reset_request.clear()
             store.reset()

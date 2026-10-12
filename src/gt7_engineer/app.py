@@ -118,7 +118,7 @@ async def run(
     last_lap_seen = None
     try:
         async for frame in source:
-            stats.frame()
+            stats.frame(frame.packet_id)
             if recorder is not None:
                 recorder.write(frame)
             if frame.lap != last_lap_seen:  # what the game says, before any of our logic touches it

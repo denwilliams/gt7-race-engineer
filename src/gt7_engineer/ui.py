@@ -193,7 +193,7 @@ class RichUI:
         t.add_row("Telemetry", f"[{colour}]● {badge}[/]  {detail}")
         s = self.stats
         if s is not None:
-            t.add_row("Packets", f"{s.received} received · {s.decoded} decoded · {s.rejected} rejected")
+            t.add_row("Packets", f"{s.received} received · {s.decoded} decoded · {s.rejected} rejected · {s.lost} lost")
         car = self.store.car if self.store else None
         if car is not None:
             sm = self.store.summary()
@@ -207,6 +207,10 @@ class RichUI:
             else:
                 pos = "n/a  " + sm.get("position_note", "").split("driver last said: ")[-1]
             t.add_row("Position", pos)
+            if sm.get("lap_progress_pct") is not None:
+                t.add_row("Lap progress", f"{_bar(sm['lap_progress_pct'] / 100, 'cyan', 16)} {sm['lap_progress_pct']}%   [dim]of {sm['lap_length_m']:,} m[/]")
+            elif sm.get("lap_length_m") is None:
+                t.add_row("Lap progress", "[dim]measuring (needs one complete lap)[/]")
             t.add_row("Speed", f"{sm['speed_kph']} km/h   gear {car.gear}   {car.rpm:.0f} rpm")
             t.add_row("Throttle", _bar(car.throttle, "green") + "   Brake " + _bar(car.brake, "red"))
             fuel = f"{sm['fuel_l']} L"
@@ -271,7 +275,7 @@ class RichUI:
 
         now = time.monotonic()
         height = self.console.size.height
-        top = 17
+        top = 18
         root = Layout()
         root.split_column(Layout(name="top", size=top), Layout(name="log"))
         root["top"].split_row(Layout(self._telemetry_panel(now), ratio=3), Layout(self._status_panel(), ratio=2))

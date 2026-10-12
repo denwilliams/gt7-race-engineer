@@ -12,11 +12,17 @@ class IngestStats:
     received: int = 0  # raw UDP datagrams
     rejected: int = 0  # datagrams that failed decryption / magic check
     decoded: int = 0  # frames that made it into the state
+    lost: int = 0  # packets GT7 sent that never reached us (gaps in its packet counter)
+    _last_id: int | None = None
     last_frame: float | None = None  # monotonic time of the last decoded frame
     _times: deque = field(default_factory=lambda: deque(maxlen=240))
 
-    def frame(self) -> None:
+    def frame(self, packet_id: int | None = None) -> None:
         now = time.monotonic()
+        if packet_id is not None:
+            if self._last_id is not None and 1 < packet_id - self._last_id <= 600:
+                self.lost += packet_id - self._last_id - 1
+            self._last_id = packet_id
         self.decoded += 1
         self.last_frame = now
         self._times.append(now)

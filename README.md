@@ -38,6 +38,8 @@ The telemetry badge at the top of the Car panel tells you whether data is arrivi
 | `● PAUSED` | data arriving but the car isn't on track (paused, menu, loading) |
 | `● STALE` | data stopped for more than 2 s |
 
+Lap length is measured from the car's position changes (the median of clean complete laps, so pit laps don't skew it) and the dashboard shows how far through the current lap you are. It needs one complete lap, and it is approximate.
+
 The race state resets automatically when a new race starts (the lap counter drops back and stays there), or press `r` on the dashboard to reset it yourself.
 
 If you wear headphones, the mic stays open while the engineer talks and you can interrupt it by speaking (`[audio] barge_in = true`, the default). On speakers set it to `false` so the engineer can't hear itself.
