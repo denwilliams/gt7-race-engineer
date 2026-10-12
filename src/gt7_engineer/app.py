@@ -13,7 +13,7 @@ from .agents.pace import PaceAgent, pace_rule
 from .bus import Bus
 from .config import Config
 from .engineer import RaceEngineer
-from .llm import ChatClient, OpenAIDecision, ThresholdDecision
+from .llm import ChatClient, JevDecision, OpenAIDecision, ThresholdDecision
 from .state import StateStore
 from .telemetry.packet import Frame
 
@@ -41,9 +41,12 @@ async def run(
 
     engineer_client = ChatClient(cfg.engineer) if use_llm else None
     reviewer_client = ChatClient(cfg.lap_reviewer) if use_llm else None
-    decision_client = ChatClient(cfg.decision) if use_llm and cfg.decision else None
+    jev = JevDecision(cfg.decision, "ignore") if use_llm and cfg.decision and cfg.decision.kind == "jev" else None
+    decision_client = ChatClient(cfg.decision) if use_llm and cfg.decision and not jev else None
 
     def decision_for(rule, default: str):
+        if jev:
+            return jev
         return OpenAIDecision(decision_client, default) if decision_client else ThresholdDecision(rule)
 
     analysts: list[Analyst] = [
@@ -82,7 +85,7 @@ async def run(
     finally:
         for t in tasks:
             t.cancel()
-        for c in (engineer_client, reviewer_client, decision_client):
+        for c in (engineer_client, reviewer_client, decision_client, jev):
             if c:
                 await c.aclose()
     return store

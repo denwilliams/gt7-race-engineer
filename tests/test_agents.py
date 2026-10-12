@@ -78,3 +78,43 @@ def test_lap_trace_silent_when_nothing_notable():
     store, bus = StateStore(), Bus()
     drive(store, [LapTraceAgent(store, bus, FakeLLM("Nothing notable."))], lap_seconds=3, total_laps=3)
     assert drain(bus) == []
+
+
+def test_jev_decision_request_and_response():
+    import httpx
+
+    from gt7_engineer.bus import CHOICES
+    from gt7_engineer.config import ModelConfig
+    from gt7_engineer.llm import JevDecision
+
+    seen = {}
+
+    def handler(req: httpx.Request) -> httpx.Response:
+        import json
+
+        seen["url"], seen["body"] = str(req.url), json.loads(req.content)
+        return httpx.Response(200, json={"answers": {"alert": {
+            "type": "choice", "choice": "urgent", "confidence": 0.9,
+            "probabilities": {"ignore": 0.0, "mention": 0.1, "urgent": 0.9}}}})
+
+    cfg = ModelConfig(base_url="https://openrouter.ai/api/alpha", model="typesafe/jev-1.13", kind="jev")
+    http = httpx.AsyncClient(base_url=cfg.base_url, transport=httpx.MockTransport(handler))
+    jev = JevDecision(cfg, "ignore", http)
+    out = asyncio.run(jev.decide("Fuel check", {"laps_of_fuel": 1.2}, CHOICES))
+    assert out == "urgent" and jev.last_probabilities["urgent"] == 0.9
+    assert seen["url"].endswith("/alpha/decisions")
+    q = seen["body"]["questions"]["alert"]
+    assert q["type"] == "choice" and set(q["criteria"]) == set(CHOICES)
+    assert seen["body"]["state"] == {"laps_of_fuel": 1.2}
+
+
+def test_jev_decision_falls_back_on_error():
+    import httpx
+
+    from gt7_engineer.bus import CHOICES
+    from gt7_engineer.config import ModelConfig
+    from gt7_engineer.llm import JevDecision
+
+    http = httpx.AsyncClient(base_url="https://x/api", transport=httpx.MockTransport(lambda r: httpx.Response(500)))
+    jev = JevDecision(ModelConfig(kind="jev"), "ignore", http)
+    assert asyncio.run(jev.decide("x", {}, CHOICES)) == "ignore"

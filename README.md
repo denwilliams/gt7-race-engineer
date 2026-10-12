@@ -4,7 +4,7 @@ A fully local, voice-in/voice-out AI race engineer for Gran Turismo 7, running o
 
 It ingests GT7 UDP telemetry into a live car and race state with a rolling frame history. Background analyst agents continuously assess that data, using calculated metrics plus a local decision model to judge whether something is worth the engineer's attention. A single race engineer agent receives those assessments and decides what to say and when. It also converses with the driver by voice and gives a briefing at every new lap.
 
-Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or similar), so they can be swapped. Nothing leaves the machine. Open source.
+Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or similar), so they can be swapped. Everything runs locally by default; the optional hosted Jev decision model is the one exception and sends only the analysts' calculated numbers. Open source.
 
 ## v1 success criteria
 
@@ -40,7 +40,7 @@ uv run pytest                                  # tests
 Everything above runs end to end against the built-in simulator and is covered by tests. Not yet verified against real hardware or real local models:
 
 - The GT7 packet layout and heartbeat (`telemetry/packet.py`) follow community documentation and are round-trip tested only.
-- The Jev-Style decision model adapter assumes an OpenAI-compatible endpoint (`llm.py`).
+- The Jev (OpenRouter) adapter follows OpenRouter's tutorial and is tested against a mocked response only; it has not been called for real. Local Jev-Style is not integrated.
 - Whisper and TTS quality and latency on the target Mac.
 
 Known issues:
@@ -80,7 +80,11 @@ PS5 --UDP--> Telemetry ingest (decrypt/decode)
 
 ### Decision model
 
-Candidate: [Jev-Style](https://pypi.org/project/jev-style/), small local decision models (0.8B / 2B, MLX on Apple silicon) that return a probability over predefined answers. It runs its own server, so it may need a dedicated adapter rather than a plain chat endpoint. Verify before relying on it, and check the license of the specific model.
+Optional. Without one, analysts use built-in threshold rules. Three ways to plug one in via `[decision]` in `config.toml`:
+
+- **Hosted Jev via OpenRouter** (`kind = "jev"`): calls the [Decisions API](https://openrouter.ai/docs/guides/community/jev) (`typesafe/jev-1.13`) with a `choice` question and uses the returned choice. **This is not local**: the analysts' calculated numbers (fuel, lap times) are sent to OpenRouter. Set `OPENROUTER_API_KEY` and `api_key_env` in the config.
+- **Local small model** (default `kind = "chat"`): any OpenAI-compatible endpoint asked to answer with one word.
+- **Local Jev-Style** ([jev-style](https://pypi.org/project/jev-style/)): not integrated; its server API is unverified here.
 
 ## Telemetry limits
 

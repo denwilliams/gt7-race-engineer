@@ -16,6 +16,12 @@ class ModelConfig:
     model: str = "local-model"
     headers: dict[str, str] = field(default_factory=dict)
     timeout: float = 30.0
+    kind: str = "chat"  # decision model only: "chat" (one-word prompt) or "jev" (Decisions API)
+    api_key_env: str = ""  # name of an env var holding a bearer token, e.g. OPENROUTER_API_KEY
+
+    def auth_headers(self) -> dict[str, str]:
+        key = os.environ.get(self.api_key_env, "") if self.api_key_env else ""
+        return {**({"Authorization": f"Bearer {key}"} if key else {}), **self.headers}
 
 
 @dataclass

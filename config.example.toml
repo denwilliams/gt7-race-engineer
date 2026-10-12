@@ -13,8 +13,15 @@ model = "your-chat-model"
 [lap_reviewer]
 model = "your-chat-model"
 
-# Optional: small decision model for the analysts (e.g. a Jev-Style server).
-# Omit it and the analysts use built-in thresholds.
+# Optional: decision model for the analysts. Omit it and they use built-in thresholds.
+# Hosted Jev via OpenRouter (NOT local: analyst numbers are sent to OpenRouter):
 # [decision]
-# base_url = "http://localhost:8000/v1"
-# model = "jev-style-2b"
+# kind = "jev"
+# base_url = "https://openrouter.ai/api/alpha"
+# model = "typesafe/jev-1.13"
+# api_key_env = "OPENROUTER_API_KEY"
+#
+# Or any local OpenAI-compatible model answering with one word:
+# [decision]
+# base_url = "http://localhost:1234/v1"
+# model = "your-small-model"

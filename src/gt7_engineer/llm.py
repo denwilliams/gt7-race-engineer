@@ -18,7 +18,7 @@ class ChatClient:
     def __init__(self, cfg: ModelConfig):
         self.cfg = cfg
         self._http = httpx.AsyncClient(
-            base_url=cfg.base_url.rstrip("/"), headers=cfg.headers, timeout=cfg.timeout
+            base_url=cfg.base_url.rstrip("/"), headers=cfg.auth_headers(), timeout=cfg.timeout
         )
 
     async def chat(self, messages: list[dict], max_tokens: int = 200, temperature: float = 0.3) -> str:
@@ -79,3 +79,52 @@ class OpenAIDecision:
             if re.search(rf"\b{re.escape(c)}\b", out, re.I):
                 return c
         return self.default
+
+
+CHOICE_CRITERIA = {
+    "ignore": "Nothing the driver needs to hear right now.",
+    "mention": "Worth a short heads-up at the next convenient moment.",
+    "urgent": "The driver must be told immediately; it affects the race result or safety.",
+}
+
+
+class JevDecision:
+    """Decision via the Jev Decisions API (OpenRouter: POST {base_url}/decisions).
+
+    Sends the analyst's calculated numbers as `state` and one `choice` question;
+    uses the returned choice. NOTE: this sends race data to the host in base_url,
+    so it is not local. Request/response shape follows OpenRouter's Jev tutorial.
+    """
+
+    def __init__(self, cfg: ModelConfig, default: str, http: httpx.AsyncClient | None = None):
+        self.cfg, self.default = cfg, default
+        self._http = http or httpx.AsyncClient(
+            base_url=cfg.base_url.rstrip("/"), headers=cfg.auth_headers(), timeout=cfg.timeout
+        )
+        self.last_probabilities: dict[str, float] = {}
+
+    async def decide(self, instructions: str, context: dict, choices: list[str]) -> str:
+        body = {
+            "model": self.cfg.model,
+            "state": context,
+            "questions": {
+                "alert": {
+                    "type": "choice",
+                    "instructions": instructions,
+                    "criteria": {c: CHOICE_CRITERIA.get(c, c) for c in choices},
+                }
+            },
+        }
+        try:
+            r = await self._http.post("/decisions", json=body)
+            r.raise_for_status()
+            ans = r.json()["answers"]["alert"]
+            self.last_probabilities = ans.get("probabilities", {})
+            choice = ans["choice"]
+        except Exception as e:  # network/model failure must never stop the race
+            log.warning("jev decision failed: %s", e)
+            return self.default
+        return choice if choice in choices else self.default
+
+    async def aclose(self) -> None:
+        await self._http.aclose()
