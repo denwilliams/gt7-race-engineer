@@ -207,6 +207,8 @@ class RichUI:
             else:
                 pos = "n/a  " + sm.get("position_note", "").split("driver last said: ")[-1]
             t.add_row("Position", pos)
+            if nt := sm.get("next_turn"):
+                t.add_row("Next turn", f"T{nt['number']} {nt['direction']}  in {nt['in_m']:,} m   [dim]({nt['angle_deg']}°)[/]")
             if sm.get("lap_progress_pct") is not None:
                 t.add_row("Lap progress", f"{_bar(sm['lap_progress_pct'] / 100, 'cyan', 16)} {sm['lap_progress_pct']}%   [dim]of {sm['lap_length_m']:,} m[/]")
             elif sm.get("lap_length_m") is None:
@@ -276,7 +278,7 @@ class RichUI:
 
         now = time.monotonic()
         height = self.console.size.height
-        top = 18
+        top = 19
         root = Layout()
         root.split_column(Layout(name="top", size=top), Layout(name="log"))
         root["top"].split_row(Layout(self._telemetry_panel(now), ratio=3), Layout(self._status_panel(), ratio=2))

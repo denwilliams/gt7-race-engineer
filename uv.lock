@@ -685,6 +685,8 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "httpx" },
+    { name = "numpy", version = "2.4.6", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.12'" },
+    { name = "numpy", version = "2.5.4", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.12'" },
     { name = "pycryptodome" },
     { name = "rich" },
 ]
@@ -711,6 +713,7 @@ requires-dist = [
     { name = "misaki", extras = ["en"], marker = "extra == 'audio'", specifier = ">=0.9.4" },
     { name = "mlx-audio", marker = "extra == 'audio'", specifier = ">=0.5.8" },
     { name = "mlx-whisper", marker = "extra == 'audio'", specifier = ">=0.4" },
+    { name = "numpy", specifier = ">=2.4.6" },
     { name = "numpy", marker = "extra == 'audio'", specifier = ">=1.26" },
     { name = "pycryptodome", specifier = ">=3.20" },
     { name = "rich", specifier = ">=13" },

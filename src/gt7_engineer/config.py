@@ -46,6 +46,13 @@ class AudioConfig:
 
 
 @dataclass
+class TrackConfig:
+    # Turn directions come from the car's path in the game's own axes, so left/right can come out
+    # reversed. If "Turn 1 L" is really a right-hander, set mirror = true.
+    mirror: bool = False
+
+
+@dataclass
 class Config:
     ps_ip: str = ""
     engineer: ModelConfig = field(default_factory=ModelConfig)
@@ -54,6 +61,7 @@ class Config:
     stt_model: str = "mlx-community/whisper-small-mlx"
     tts: TTSConfig = field(default_factory=TTSConfig)
     audio: AudioConfig = field(default_factory=AudioConfig)
+    track: TrackConfig = field(default_factory=TrackConfig)
     min_seconds_between_calls: float = 8.0
 
 
@@ -77,6 +85,7 @@ def load(path: str | Path = "config.toml") -> Config:
         stt_model=raw.get("stt_model", Config.stt_model),
         tts=TTSConfig(**raw.get("tts", {})),
         audio=AudioConfig(**raw.get("audio", {})),
+        track=TrackConfig(**raw.get("track", {})),
     )
     cfg.ps_ip = os.environ.get("GT7_PS_IP", cfg.ps_ip)
     return cfg

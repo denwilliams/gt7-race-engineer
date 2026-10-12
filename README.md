@@ -42,6 +42,8 @@ Lap length is measured from the car's position changes (the median of clean comp
 
 Pit stops are detected from the telemetry itself: a refuel (stationary, fuel climbing) and a tyre change (all four temperatures snap to the same lower value) are found independently, because a stop can be fuel only, tyres only, or both. Either one is announced when the car drives away, a tyre change clears an out-of-date wear report, and the dashboard shows how many laps old the tyres are.
 
+The app learns the track from the clean laps you drive: it finds the turns (how many, which way, how far from the line), shows the next turn ahead, and compares your laps turn by turn (which gear, braking point and throttle pickup the fastest laps used). Directions come from the car's path in the game's own axes; if "Turn 1 L" is really a right-hander, set `[track] mirror = true`.
+
 The race state resets automatically when a new race starts (the lap counter drops back and stays there), or press `r` on the dashboard to reset it yourself.
 
 If you wear headphones, the mic stays open while the engineer talks and you can interrupt it by speaking (`[audio] barge_in = true`, the default). On speakers set it to `false` so the engineer can't hear itself.

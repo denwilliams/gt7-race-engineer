@@ -16,7 +16,7 @@ from .bus import Bus
 from .config import Config
 from .engineer import RaceEngineer
 from .llm import ChatClient, JevDecision, OpenAIDecision, ThresholdDecision, make_chat
-from .state import NewRace, StateStore
+from .state import NewRace, StateStore, TrackMapped
 from .telemetry.packet import Frame
 from .telemetry.stats import IngestStats
 
@@ -47,7 +47,7 @@ async def run(
     reset_request: asyncio.Event | None = None,
     recorder=None,
 ) -> StateStore:
-    store, bus = StateStore(), Bus()
+    store, bus = StateStore(mirror=cfg.track.mirror), Bus()
     stats = stats if stats is not None else IngestStats()
     ui.attach(store=store, stats=stats)
 
@@ -138,8 +138,11 @@ async def run(
                 engineer.reset()
                 ui.log("system", f"🔄 New race detected ({event.reason}): state reset")
                 event = None
-            while store.events:  # pit stops finished since the last frame
+            while store.events:  # pit stops and track-map changes since the last frame
                 stop = store.events.popleft()
+                if isinstance(stop, TrackMapped):
+                    ui.log("system", f"🗺 Track mapped: {stop.turns} turns (from {stop.laps} clean lap{'s' if stop.laps != 1 else ''})")
+                    continue
                 bits = ([f"+{stop.added_l:.0f} L"] if stop.added_l else []) + (["new tyres"] if stop.tyres_changed else [])
                 ui.log("lap", f"🛞 Pit stop, lap {stop.lap}: {', '.join(bits)}")
                 spawn(engineer.on_pit_stop(stop))

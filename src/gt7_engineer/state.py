@@ -10,6 +10,7 @@ from dataclasses import dataclass, field
 from .pit import PitDetector, PitStop, TyreChange
 from .telemetry.packet import Frame
 from .timefmt import fmt_lap
+from .track import TrackModel
 
 FRAME_HZ = 60
 HISTORY_SECONDS = 600
@@ -52,6 +53,14 @@ class DriverReport:
 
 
 @dataclass(slots=True)
+class TrackMapped:
+    """The turn map was (re)built or its turn count changed."""
+
+    turns: int
+    laps: int
+
+
+@dataclass(slots=True)
 class NewRace:
     """Emitted by StateStore.update() when the state was reset because a new race began."""
 
@@ -66,8 +75,9 @@ class NewLap:
 
 
 class StateStore:
-    def __init__(self, history_seconds: int = HISTORY_SECONDS, keep_laps: int = 10):
-        self._args = (history_seconds, keep_laps)
+    def __init__(self, history_seconds: int = HISTORY_SECONDS, keep_laps: int = 10, mirror: bool = False):
+        self._args = (history_seconds, keep_laps, mirror)
+        self.track = TrackModel(mirror=mirror)  # turns learned from the clean laps driven
         self._max_lap = 0
         self._regress = 0
         self.frames: deque[Frame] = deque(maxlen=history_seconds * FRAME_HZ)
@@ -83,7 +93,7 @@ class StateStore:
         self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
         self.pit = PitDetector()
         self.pit_stops: list[PitStop] = []
-        self.events: deque[PitStop] = deque(maxlen=50)  # drained by the app (pit stops to announce)
+        self.events: deque = deque(maxlen=50)  # drained by the app (pit stops, track map changes)
         self.tyres_first_lap: int | None = None  # first lap run on the current set of tyres (None: unknown)
         self._lap_dist = 0.0  # metres driven so far this lap
         self._lap_dist_ok = True  # False once a teleport is seen this lap
@@ -174,6 +184,11 @@ class StateStore:
                 distance_m=self._lap_dist, distance_ok=self._lap_dist_ok and not self._lap_partial,
             )
             self.laps.append(rec)
+            if rec.distance_ok and len(done) > 100:  # a clean, complete lap: learn the turns from it
+                before = len(self.track.turns)
+                self.track.add_lap(rec.lap, done)
+                if len(self.track.turns) != before:
+                    self.events.append(TrackMapped(len(self.track.turns), len(self.track.profiles)))
             event = NewLap(rec)
             self._lap_frames = []
             self._lap_start_fuel = None
@@ -244,6 +259,17 @@ class StateStore:
     def lap_distance_so_far_m(self) -> float | None:
         """Metres driven on the current lap; None if we don't know where the lap began."""
         return self._lap_dist if self.car is not None and self.car.lap >= 1 and not self._lap_partial and self._lap_dist_ok else None
+
+    @property
+    def next_turn(self) -> dict | None:
+        """The next turn ahead of the car and how far away turn-in is (needs the track mapped)."""
+        d = self.lap_distance_so_far_m
+        nxt = self.track.next_turn(d) if d is not None else None
+        if nxt is None:
+            return None
+        turn, dist = nxt
+        return {"number": turn.number, "direction": turn.label(self.track.mirror), "in_m": round(dist),
+                "angle_deg": round(abs(turn.angle_deg))}
 
     @property
     def lap_progress(self) -> float | None:
@@ -399,6 +425,16 @@ class StateStore:
                 {"lap": p.lap, "fuel_added_l": round(p.added_l, 1) if p.added_l else None, "new_tyres": p.tyres_changed}
                 for p in self.pit_stops
             ]
+        if self.track.turns:
+            m = self.track.mirror
+            out["track_turns"] = [
+                {"n": t.number, "dir": t.label(m), "apex_m": round(t.apex_s), "angle": round(abs(t.angle_deg))}
+                for t in self.track.turns
+            ]
+            if (nt := self.next_turn) is not None:
+                out["next_turn"] = nt
+            if ins := self.track.insights()[:4]:
+                out["turn_insights"] = [i.text for i in ins]
         if (length := self.lap_length_m) is not None:
             out["lap_length_m"] = round(length)
             if (prog := self.lap_progress) is not None:
