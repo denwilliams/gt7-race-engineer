@@ -16,6 +16,7 @@ engine = "qwen3"
 base_url = "http://localhost:1234/v1"
 model = "your-chat-model"
 # headers = { Authorization = "Bearer ..." }
+# reasoning_effort = "none"   # switch off thinking on reasoning models (e.g. gemma4 on Ollama), else replies can come back empty
 
 # Optional: defaults to the [engineer] endpoint
 [lap_reviewer]

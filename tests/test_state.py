@@ -61,3 +61,10 @@ def test_pit_stop_lap_excluded_from_burn():
     assert [l.burn_valid for l in store.laps] == [True, True, False, True, True]
     assert abs(store.fuel_per_lap - 7.0) < 0.3
     assert all(abs(b - 7.0) < 0.3 for b in store.burns)
+
+
+def test_summary_has_fuel_margin():
+    store, _ = run_sim(lap_seconds=3, total_laps=6, start_fuel=40.0, fuel_per_lap=7.0)
+    sm = store.summary()
+    assert sm["laps_remaining_including_current"] == 1  # final lap in progress
+    assert "fuel_margin_laps" in sm

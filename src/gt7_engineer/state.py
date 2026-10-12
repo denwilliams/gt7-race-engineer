@@ -161,8 +161,13 @@ class StateStore:
             "last_lap_ms": c.last_lap_ms if c.last_lap_ms > 0 else None,
             "tyre_temp_c": [round(x) for x in c.tyre_temp],
         }
+        if (left := self.laps_remaining) is not None:
+            out["laps_remaining_including_current"] = left
         if fpl and fpl > 0:
             out["laps_of_fuel"] = round(c.fuel / fpl, 1)
+            if left is not None:
+                margin = round(c.fuel / fpl - left, 1)
+                out["fuel_margin_laps"] = margin  # negative: cannot finish without saving fuel or pitting
         out["fuel_burn_last_laps_l"] = [round(x, 2) for x in self.burns]
         if (trend := self.burn_trend) is not None:
             out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L per lap each lap)"

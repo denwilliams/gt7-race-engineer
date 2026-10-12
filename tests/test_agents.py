@@ -162,3 +162,29 @@ def test_tts_engine_selection_and_playback_path():
         tts._play = lambda chunks, played=played: played.append(list(chunks))
         asyncio.run(tts.speak("hello"))
         assert len(played[-1]) == n and played[-1][0].dtype == np.float32
+
+
+def test_chat_client_sends_reasoning_effort_and_handles_empty():
+    import json
+
+    import httpx
+
+    from gt7_engineer.config import ModelConfig
+    from gt7_engineer.llm import ChatClient
+
+    seen = []
+
+    def handler(req):
+        seen.append(json.loads(req.content))
+        return httpx.Response(200, json={"choices": [{"message": {"content": "", "reasoning": "hmm"}, "finish_reason": "length"}]})
+
+    cfg = ModelConfig(base_url="http://x/v1", reasoning_effort="none")
+    c = ChatClient(cfg)
+    c._http = httpx.AsyncClient(base_url=cfg.base_url, transport=httpx.MockTransport(handler))
+    assert asyncio.run(c.chat([{"role": "user", "content": "hi"}])) == ""
+    assert seen[0]["reasoning_effort"] == "none"
+    cfg2 = ModelConfig(base_url="http://x/v1")
+    c2 = ChatClient(cfg2)
+    c2._http = httpx.AsyncClient(base_url=cfg2.base_url, transport=httpx.MockTransport(handler))
+    asyncio.run(c2.chat([{"role": "user", "content": "hi"}]))
+    assert "reasoning_effort" not in seen[1]

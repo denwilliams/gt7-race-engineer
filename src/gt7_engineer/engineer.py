@@ -126,11 +126,12 @@ class RaceEngineer:
         if self.client is None:
             return "No language model is configured, so I can't answer that."
         try:
-            return await self.client.chat(
+            text = await self.client.chat(
                 [{"role": "system", "content": f"{SYSTEM}\nCurrent car and race state: {state}"}]
                 + self.history[-8:],
                 max_tokens=100,
             )
+            return text or "Sorry, say again?"
         except Exception as e:
             log.warning("engineer answer failed: %s", e)
             return "Sorry, I lost the model there. Say again in a moment."

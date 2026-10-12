@@ -22,17 +22,25 @@ class ChatClient:
         )
 
     async def chat(self, messages: list[dict], max_tokens: int = 200, temperature: float = 0.3) -> str:
-        r = await self._http.post(
-            "/chat/completions",
-            json={
-                "model": self.cfg.model,
-                "messages": messages,
-                "max_tokens": max_tokens,
-                "temperature": temperature,
-            },
-        )
+        body = {
+            "model": self.cfg.model,
+            "messages": messages,
+            "max_tokens": max_tokens,
+            "temperature": temperature,
+        }
+        if self.cfg.reasoning_effort:
+            body["reasoning_effort"] = self.cfg.reasoning_effort
+        r = await self._http.post("/chat/completions", json=body)
         r.raise_for_status()
-        return r.json()["choices"][0]["message"]["content"].strip()
+        choice = r.json()["choices"][0]
+        text = (choice["message"].get("content") or "").strip()
+        if not text and choice.get("finish_reason") == "length":
+            log.warning(
+                "%s returned no text: it ran out of tokens, probably thinking. "
+                'Set reasoning_effort = "none" for this model in config.toml.',
+                self.cfg.model,
+            )
+        return text
 
     async def aclose(self) -> None:
         await self._http.aclose()
