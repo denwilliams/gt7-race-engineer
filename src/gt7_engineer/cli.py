@@ -37,14 +37,19 @@ async def _run(args) -> None:
         from .audio.stt import WhisperListener
 
         tts = make_tts(cfg.tts)
-        print(f"Loading voice ({cfg.tts.engine})...", flush=True)
-        await tts.warmup()
+        listener = WhisperListener(cfg.stt_model, speaking)
+        print(
+            f"Loading speech recognition ({cfg.stt_model}) and voice ({cfg.tts.engine}); "
+            "the first run downloads the models...",
+            flush=True,
+        )
+        await asyncio.gather(listener.warmup(), tts.warmup())  # Whisper starts loading immediately, in parallel
 
         async def speak(text: str) -> None:
             print(f"\n🎙  ENGINEER: {text}\n", flush=True)  # exact text handed to the TTS engine
             await tts.speak(text)
 
-        utterances = WhisperListener(cfg.stt_model, speaking).utterances()
+        utterances = listener.utterances()
     await app.run(cfg, _source(args, cfg), speak, utterances, use_llm=not args.no_llm, speaking=speaking)
 
 

@@ -66,8 +66,11 @@ async def run(
         t.add_done_callback(background.discard)
 
     async def listen() -> None:
-        async for text in utterances:
-            await engineer.on_driver(text)
+        try:
+            async for text in utterances:
+                await engineer.on_driver(text)
+        except Exception:
+            log.exception("microphone/speech recognition stopped; the engineer can no longer hear you")
 
     if utterances is not None:
         tasks.append(asyncio.create_task(listen()))

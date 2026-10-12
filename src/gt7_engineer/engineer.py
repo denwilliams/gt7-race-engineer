@@ -22,6 +22,7 @@ SYSTEM = (
 
 TYRE_WORDS = re.compile(r"\b(tyres?|tires?|wear|fronts?|rears?)\b", re.I)
 TYRE_QUESTION = "How are the tyres looking?"
+QUESTION = re.compile(r"\s*(how|what|when|where|why|which|who|can|could|should|do|does|is|are|will)\b", re.I)
 
 
 class RaceEngineer:
@@ -114,7 +115,7 @@ class RaceEngineer:
             return
         log.debug("DRIVER: %s", text)
         self.history.append({"role": "user", "content": text})
-        if self.awaiting_tyre_reply or (TYRE_WORDS.search(text) and re.search(r"\d|%|good|fine|gone|worn|low", text, re.I)):
+        if self.awaiting_tyre_reply or (TYRE_WORDS.search(text) and not QUESTION.match(text) and "?" not in text):
             self.awaiting_tyre_reply = False
             self.store.add_report("tyre_wear", text)
             await self._say("Copy, tyres noted.")

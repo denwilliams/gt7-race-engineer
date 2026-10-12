@@ -91,3 +91,44 @@ async def test_end_to_end_simulated_race_without_llm():
     text = " ".join(said)
     assert "Lap" in text  # lap updates reached the driver
     assert "Fuel" in text  # fuel shortfall flagged
+
+
+async def test_listener_crash_is_reported_not_swallowed(caplog):
+    async def broken():
+        raise RuntimeError("no microphone")
+        yield ""
+
+    said = []
+
+    async def speak(t):
+        said.append(t)
+
+    src = simulator.frames(realtime=False, lap_seconds=2, total_laps=2)
+    with caplog.at_level("ERROR"):
+        await app.run(Config(), src, speak, broken(), use_llm=False)
+    assert any("can no longer hear you" in r.getMessage() for r in caplog.records)
+
+
+async def test_driver_text_from_listener_reaches_engineer():
+    said = []
+
+    async def speak(t):
+        said.append(t)
+
+    async def heard():
+        yield "fronts are at sixty percent tyre wear"
+        await asyncio.sleep(0.2)
+
+    src = simulator.frames(realtime=False, lap_seconds=2, total_laps=3)
+    store = await app.run(Config(), src, speak, heard(), use_llm=False)
+    assert store.latest_report("tyre_wear") is not None
+
+
+async def test_tyre_statements_vs_questions():
+    store, bus, said, speak = make()
+    await prime(store)
+    eng = RaceEngineer(store, bus, FakeClient("ok"), speak)
+    await eng.on_driver("how are the tyres looking?")
+    assert store.latest_report("tyre_wear") is None  # a question, not a report
+    await eng.on_driver("fronts are at sixty percent, rears seventy")
+    assert store.latest_report("tyre_wear").value.startswith("fronts")
