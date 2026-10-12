@@ -45,7 +45,10 @@ async def _run(args) -> None:
         "Source": "simulator" if args.simulate else f"PlayStation {cfg.ps_ip}",
     }
     if not args.no_llm:
-        info["LLM"] = f"{cfg.engineer.model} @ {urlparse(cfg.engineer.base_url).netloc}"
+        e = cfg.engineer
+        info["LLM"] = (
+            f"{e.model} via Pi ({e.provider})" if e.kind == "pi" else f"{e.model} @ {urlparse(e.base_url).netloc}"
+        )
     speaking = asyncio.Event()
     stop_speaking = interrupter = None
     if args.text:

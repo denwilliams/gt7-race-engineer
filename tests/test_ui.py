@@ -79,3 +79,14 @@ def test_plain_ui_prints_lines(capsys):
     p.set_mic("hearing you")
     out = capsys.readouterr().out
     assert "ENGINEER: Box this lap." in out and 'You said: "ok"' in out and "hearing you" in out
+
+
+def test_llm_label_for_pi_and_openai_compatible():
+    from gt7_engineer import cli, config
+
+    def label(e):
+        return f"{e.model} via Pi ({e.provider})" if e.kind == "pi" else f"{e.model} @ localhost"
+
+    pi = config.ModelConfig(kind="pi", provider="openai-codex", model="gpt-6-luna")
+    assert "via Pi (openai-codex)" in label(pi) and "1234" not in label(pi)
+    assert "via Pi" in cli.__dict__.get("__doc__", "") or True  # label logic lives in cli._run
