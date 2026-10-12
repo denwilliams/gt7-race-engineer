@@ -65,18 +65,50 @@ async def test_urgent_spoken_immediately_normal_queued():
     assert "pace" in eng.pending
 
 
-async def test_lap_ping_combines_and_asks_tyres():
+async def lap_event(store):
+    class Ev:  # minimal NewLap stand-in
+        record = store.laps[-1]
+
+    return Ev()
+
+
+async def test_every_lap_gets_an_update_even_with_nothing_pending():
+    store, bus, said, speak = make()
+    await prime(store)
+    eng = RaceEngineer(store, bus, None, speak, tyre_ask_every=0)
+    assert not eng.pending
+    await eng.on_lap(await lap_event(store))
+    assert len(said) == 1 and said[0].startswith("Lap ") and "Last lap" in said[0] and "Fuel" in said[0]
+
+
+async def test_lap_update_is_not_held_back_by_a_recent_call():
+    store, bus, said, speak = make()
+    await prime(store)
+    eng = RaceEngineer(store, bus, None, speak, tyre_ask_every=0)
+    await eng._say("Something just said.")
+    await eng.on_lap(await lap_event(store))
+    assert len(said) == 2  # spoke straight away, no min-gap deferral
+
+
+async def test_lap_update_adds_coaching_but_not_duplicate_fuel_or_pace():
+    store, bus, said, speak = make()
+    await prime(store)
+    eng = RaceEngineer(store, bus, None, speak, tyre_ask_every=0)
+    eng.pending["pace"] = Assessment("pace", "pace", "mention", "DUPLICATE PACE TEXT")
+    eng.pending["fuel"] = Assessment("fuel", "fuel", "mention", "DUPLICATE FUEL TEXT")
+    eng.pending["coaching"] = Assessment("lap_trace", "coaching", "mention", "Brake later into turn three.")
+    await eng.on_lap(await lap_event(store))
+    assert "Brake later into turn three." in said[0]
+    assert "DUPLICATE" not in said[0]
+    assert not eng.pending  # consumed
+
+
+async def test_lap_update_asks_about_tyres_on_schedule():
     store, bus, said, speak = make()
     await prime(store)
     eng = RaceEngineer(store, bus, None, speak, tyre_ask_every=1)
-    eng.pending["pace"] = Assessment("pace", "pace", "mention", "Lap 1: 0:30.000.")
-
-    class Ev:  # minimal NewLap stand-in
-        record = store.laps[-1] if store.laps else type("R", (), {"lap": 1})()
-
-    await eng.on_lap(Ev())
-    assert said and "0:30.000" in said[0] and TYRE_QUESTION in said[0]
-    assert eng.awaiting_tyre_reply
+    await eng.on_lap(await lap_event(store))
+    assert TYRE_QUESTION in said[0] and eng.awaiting_tyre_reply
 
 
 async def test_end_to_end_simulated_race_without_llm():

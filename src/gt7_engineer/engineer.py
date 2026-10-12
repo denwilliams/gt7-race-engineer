@@ -9,6 +9,7 @@ import re
 from collections.abc import Awaitable, Callable
 
 from . import ui
+from .briefing import lap_update
 from .bus import PRIORITY, URGENT, Assessment, Bus
 from .llm import ChatClient
 from .state import NewLap, StateStore
@@ -16,13 +17,21 @@ from .state import NewLap, StateStore
 log = logging.getLogger(__name__)
 
 SYSTEM = (
-    "You are the driver's race engineer in Gran Turismo 7, on the radio. Be brief: one or two short spoken "
-    "sentences, plain words, no markdown, no emoji. Use only the facts given; never invent numbers. "
-    "If you don't know, say so."
+    "You are the driver's race engineer, on the radio during a Gran Turismo 7 race. The driver is busy "
+    "driving, so be concise and accurate: one short sentence, two at most. Lead with the answer or the "
+    "action, then the key number. No greetings, filler, pleasantries, apologies or explanations unless asked. "
+    "Plain spoken words, no markdown, no emoji. Say lap times the way a person would speak them, "
+    "e.g. 'one thirty-two point four'. Use only the numbers in the data; never guess, round differently or "
+    "invent anything. If the data isn't there, say 'Don't have that.'\n"
+    "Examples of the style (the numbers are made up; always use the real data):\n"
+    "Driver: how's my fuel? -> 'Four point two laps of fuel, five to go. Save fuel or box.'\n"
+    "Driver: last lap? -> 'One forty-one point nine, half a second off your best.'\n"
+    "Driver: gap to the leader? -> 'Don't have that.'"
 )
 
 TYRE_WORDS = re.compile(r"\b(tyres?|tires?|wear|fronts?|rears?)\b", re.I)
 TYRE_QUESTION = "How are the tyres looking?"
+COVERED_BY_UPDATE = {"fuel", "pace"}  # the lap update already reports these
 ORDINALS = {
     "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
     "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15,
@@ -112,7 +121,7 @@ class RaceEngineer:
             text = await self.client.chat(
                 [
                     {"role": "system", "content": SYSTEM},
-                    {"role": "user", "content": f"Radio the driver these facts: {facts} {extra}".strip()},
+                    {"role": "user", "content": f"Radio the driver this in one short sentence, keeping every number: {facts} {extra}".strip()},
                 ],
                 max_tokens=80,
             )
@@ -140,21 +149,17 @@ class RaceEngineer:
                 await self._say(await self._phrase([a]))
 
     async def on_lap(self, event: NewLap) -> None:
-        """Lap ping: give one combined update, then maybe ask about tyres."""
+        """Every new lap gets a race update: built from the race state, plus anything else the analysts have."""
         await asyncio.sleep(1.0)  # let the analysts publish for this lap
         items = sorted(self.pending.values(), key=lambda a: -PRIORITY[a.level])
         self.pending.clear()
-        ask = self.tyre_ask_every and event.record.lap % self.tyre_ask_every == 0
-        if not items and not ask:
-            return
-        if items and self._now() - self._last_spoke < self.min_gap and not ask:
-            self.pending.update({a.topic: a for a in items})  # too soon; keep for next lap
-            return
-        text = await self._phrase(items[:3])
-        if ask:
-            text = f"{text} {TYRE_QUESTION}".strip()
+        # Fuel and pace are already in the update itself; only add what it doesn't cover (e.g. coaching).
+        extras = [a.message for a in items if a.topic not in COVERED_BY_UPDATE][:2]
+        parts = [lap_update(self.store, event), *extras]
+        if self.tyre_ask_every and event.record.lap % self.tyre_ask_every == 0:
+            parts.append(TYRE_QUESTION)
             self.awaiting_tyre_reply = True
-        await self._say(text)
+        await self._say(" ".join(p for p in parts if p))
 
     # ---- driver -------------------------------------------------------
     async def on_driver(self, text: str) -> None:
