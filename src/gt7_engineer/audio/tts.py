@@ -60,60 +60,61 @@ ENGINE_DEFAULTS = {
 def play_stream(chunks, prebuffer: float = 0.6) -> float:
     """Play audio chunks as they are generated; returns seconds of underrun (audible gaps).
 
-    Generation runs in this thread while the sound card pulls from a buffer in its
-    own callback, so generating the next chunk overlaps with playing the last one.
-    Playback starts once `prebuffer` seconds are queued (or generation finishes).
+    Generation runs in its own thread and this thread only does blocking
+    `write()` calls, so no Python runs in the audio path. (Generating and playing
+    in one thread, or feeding the device from a Python callback, produced audible
+    stutter at the start of every phrase.) Playback starts once `prebuffer`
+    seconds are queued, or when generation finishes.
     """
+    import queue
     import threading
-    from collections import deque
 
     import numpy as np
     import sounddevice as sd
 
-    buf: deque = deque()
-    lock = threading.Lock()
-    st = {"done": False, "gap": 0, "started": False}
+    q: queue.Queue = queue.Queue()
+    error: list[BaseException] = []
 
-    def callback(outdata, frames, time_info, status):
-        with lock:
-            need, pos = frames, 0
-            while need and buf:
-                head = buf[0]
-                n = min(need, len(head))
-                outdata[pos : pos + n, 0] = head[:n]
-                if n == len(head):
-                    buf.popleft()
-                else:
-                    buf[0] = head[n:]
-                pos, need = pos + n, need - n
-            if need:
-                outdata[pos:, 0] = 0.0
-                if not st["done"]:
-                    st["gap"] += need
+    def produce() -> None:
+        try:
+            for c in chunks:
+                q.put(np.asarray(c, dtype=np.float32).reshape(-1, 1))
+        except BaseException as e:  # surface generation failures to the caller
+            error.append(e)
+        finally:
+            q.put(None)
 
-    stream = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", callback=callback, latency="high")
-    queued = 0
-    try:
-        for c in chunks:
-            with lock:
-                buf.append(np.asarray(c, dtype=np.float32))
-            queued += len(c)
-            if not st["started"] and queued >= prebuffer * SAMPLE_RATE:
-                st["started"] = True
-                stream.start()
-        st["done"] = True
-        if not st["started"]:
-            stream.start()
-        while True:  # drain
-            with lock:
-                if not buf:
+    threading.Thread(target=produce, daemon=True).start()
+
+    pending, queued, ended = [], 0, False
+    while queued < prebuffer * SAMPLE_RATE:
+        c = q.get()
+        if c is None:
+            ended = True
+            break
+        pending.append(c)
+        queued += len(c)
+
+    underflows = 0
+    if pending:
+        out = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", latency="high")
+        out.start()
+        try:
+            for c in pending:
+                underflows += bool(out.write(c))
+            while not ended:
+                c = q.get()
+                if c is None:
                     break
-            sd.sleep(20)
-        sd.sleep(int(stream.latency * 1000) + 50)
-    finally:
-        stream.stop()
-        stream.close()
-    return st["gap"] / SAMPLE_RATE
+                underflows += bool(out.write(c))
+        finally:
+            out.stop()
+            out.close()
+    if error:
+        raise error[0]
+    if underflows:
+        log.warning("TTS playback underflowed %d time(s); try a larger prebuffer", underflows)
+    return float(underflows)
 
 
 class MLXTTS:
@@ -127,7 +128,7 @@ class MLXTTS:
         self.instruct = cfg.instruct or d["instruct"]
         self.speed = cfg.speed
         self.prebuffer = cfg.prebuffer
-        self.last_underrun_s = 0.0  # seconds of silence inserted by the last utterance (stutter)
+        self.last_underrun_s = 0.0  # device underflow count for the last utterance (0 = clean)
         self.streaming_interval = 0.32  # qwen3: seconds of audio per streamed chunk
         self._model = None
 

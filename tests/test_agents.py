@@ -188,3 +188,43 @@ def test_chat_client_sends_reasoning_effort_and_handles_empty():
     c2._http = httpx.AsyncClient(base_url=cfg2.base_url, transport=httpx.MockTransport(handler))
     asyncio.run(c2.chat([{"role": "user", "content": "hi"}]))
     assert "reasoning_effort" not in seen[1]
+
+
+def test_play_stream_overlaps_generation_and_propagates_errors(monkeypatch):
+    import threading
+
+    import numpy as np
+    import sounddevice as sd
+
+    from gt7_engineer.audio.tts import play_stream
+
+    writes, gen_thread = [], []
+
+    class FakeStream:
+        def __init__(self, **kw): pass
+        def start(self): pass
+        def stop(self): pass
+        def close(self): pass
+        def write(self, c):
+            writes.append((threading.current_thread().name, len(c)))
+            return False
+
+    monkeypatch.setattr(sd, "OutputStream", FakeStream)
+
+    def gen():
+        gen_thread.append(threading.current_thread().name)
+        for _ in range(5):
+            yield np.ones(4800, dtype=np.float32)  # 0.2 s each
+
+    assert play_stream(gen(), prebuffer=0.5) == 0.0
+    assert len(writes) == 5 and sum(n for _, n in writes) == 24000
+    assert gen_thread[0] != writes[0][0]  # generation is not on the playback thread
+
+    def boom():
+        yield np.ones(4800, dtype=np.float32)
+        raise RuntimeError("model failed")
+
+    import pytest
+
+    with pytest.raises(RuntimeError, match="model failed"):
+        play_stream(boom(), prebuffer=0.1)
