@@ -42,6 +42,11 @@ class PrintTTS:
 
 
 SAMPLE_RATE = 24000
+WARMUP_LINES = [
+    "Box.",
+    "Lap three, one thirty two point four. Plus point two to your best.",
+    "Fuel is critical. Two laps left but three to run. Short by one lap, so lift and coast to save fuel, or pit now.",
+]
 ENGINE_DEFAULTS = {
     "qwen3": {
         "model": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",
@@ -62,6 +67,7 @@ class MLXTTS:
         self.voice = cfg.voice or d["voice"]
         self.instruct = cfg.instruct or d["instruct"]
         self.speed = cfg.speed
+        self.streaming_interval = 0.32  # qwen3: seconds of audio per streamed chunk
         self._model = None
 
     def _load(self):
@@ -78,7 +84,7 @@ class MLXTTS:
         if self.engine == "qwen3":
             gen = m.generate_custom_voice(
                 text=text, speaker=self.voice, language="English", instruct=self.instruct,
-                stream=True, streaming_interval=0.32,
+                stream=True, streaming_interval=self.streaming_interval,
             )
         else:
             gen = m.generate(text=text, voice=self.voice, speed=self.speed, lang_code="a")
@@ -99,11 +105,15 @@ class MLXTTS:
         await asyncio.get_running_loop().run_in_executor(None, self._speak_blocking, text)
 
     async def warmup(self) -> None:
-        """Load the model and run one silent generation: the first call is much slower than the rest."""
+        """Load the model and run silent generations of a few lengths.
+
+        The first call at a new length can be much slower (Kokoro: ~2.7 s vs 0.2 s), so cover short and long.
+        """
 
         def go() -> None:
-            for _ in self._chunks("Radio check."):
-                pass
+            for text in WARMUP_LINES:
+                for _ in self._chunks(text):
+                    pass
 
         await asyncio.get_running_loop().run_in_executor(None, go)
 
