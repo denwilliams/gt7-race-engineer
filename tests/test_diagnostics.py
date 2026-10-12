@@ -62,9 +62,9 @@ async def test_recorder_writes_jsonl_decimated_but_keeps_transitions(tmp_path):
         r.write(f)
     r.close()
     rows = [json.loads(l) for l in path.read_text().splitlines()]
-    assert 20 < len(rows) < len(fs) / 5  # 5 Hz, not 60 Hz
+    assert 20 < len(rows) < len(fs) / 4  # ~10 Hz, not 60 Hz
     assert {1, 2, 3} <= {x["lap"] for x in rows}  # every lap change is captured
-    for key in ("t", "lap", "laps", "flags", "on_track", "pos", "cars", "fuel", "last_ms", "best_ms"):
+    for key in ("t", "lap", "laps", "flags", "on_track", "pos", "cars", "fuel", "last_ms", "best_ms", "x", "y", "z", "ms"):
         assert key in rows[0]
 
 

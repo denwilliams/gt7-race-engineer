@@ -6,7 +6,7 @@ import json
 
 from .telemetry.packet import Frame
 
-SAMPLE_EVERY_S = 0.2  # 5 Hz is plenty; lap/flag changes are always written
+SAMPLE_EVERY_S = 0.1  # 10 Hz keeps lap distance accurate enough; lap/flag changes are always written
 
 
 class Recorder:
@@ -27,6 +27,8 @@ class Recorder:
                     "t": round(f.t, 3), "id": f.packet_id, "lap": f.lap, "laps": f.total_laps,
                     "flags": f.flags & 0xFFFF, "on_track": f.on_track, "pos": f.race_position, "cars": f.num_cars,
                     "fuel": round(f.fuel, 2), "kph": round(f.speed_kph, 1), "gear": f.gear,
+                    "x": round(f.position[0], 2), "y": round(f.position[1], 2), "z": round(f.position[2], 2),
+                    "ms": round(f.speed, 3),
                     "last_ms": f.last_lap_ms, "best_ms": f.best_lap_ms,
                 }
             )
