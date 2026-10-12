@@ -43,6 +43,10 @@ Everything above runs end to end against the built-in simulator and is covered b
 - The Jev-Style decision model adapter assumes an OpenAI-compatible endpoint (`llm.py`).
 - Whisper and TTS quality and latency on the target Mac.
 
+Known issues:
+
+- Whisper transcription runs in-process (in a worker thread). A long transcription could stall the event loop that handles telemetry and the engineer. Untested; if it shows up as telemetry lag or dropped frames, move STT to a separate child process behind an OpenAI-compatible `/v1/audio/transcriptions` interface so the app doesn't care whether it's local or external.
+
 Code layout: `telemetry/` (decode, UDP ingest, simulator), `state.py` (state + frame history), `agents/` (analysts), `engineer.py` (arbiter and conversation), `audio/` (Whisper STT, `say` TTS), `app.py` (wiring), `cli.py`.
 
 ## Architecture
