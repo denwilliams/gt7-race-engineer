@@ -15,6 +15,13 @@ from .telemetry import ingest, simulator
 from .telemetry.stats import IngestStats
 
 
+def llm_label(m: config.ModelConfig) -> str:
+    """How the dashboard names a model: Pi has no URL, so don't show the (unused) default base_url."""
+    if m.kind == "pi":
+        return f"{m.model} via Pi ({m.provider})"
+    return f"{m.model} @ {urlparse(m.base_url).netloc}"
+
+
 def _source(args, cfg, stats: IngestStats):
     if args.simulate:
         return simulator.frames(
@@ -45,10 +52,7 @@ async def _run(args) -> None:
         "Source": "simulator" if args.simulate else f"PlayStation {cfg.ps_ip}",
     }
     if not args.no_llm:
-        e = cfg.engineer
-        info["LLM"] = (
-            f"{e.model} via Pi ({e.provider})" if e.kind == "pi" else f"{e.model} @ {urlparse(e.base_url).netloc}"
-        )
+        info["LLM"] = llm_label(cfg.engineer)
     speaking = asyncio.Event()
     stop_speaking = interrupter = None
     if args.text:

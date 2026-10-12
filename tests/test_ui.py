@@ -82,11 +82,10 @@ def test_plain_ui_prints_lines(capsys):
 
 
 def test_llm_label_for_pi_and_openai_compatible():
-    from gt7_engineer import cli, config
+    from gt7_engineer.cli import llm_label
+    from gt7_engineer.config import ModelConfig
 
-    def label(e):
-        return f"{e.model} via Pi ({e.provider})" if e.kind == "pi" else f"{e.model} @ localhost"
-
-    pi = config.ModelConfig(kind="pi", provider="openai-codex", model="gpt-6-luna")
-    assert "via Pi (openai-codex)" in label(pi) and "1234" not in label(pi)
-    assert "via Pi" in cli.__dict__.get("__doc__", "") or True  # label logic lives in cli._run
+    pi = ModelConfig(kind="pi", provider="openai-codex", model="gpt-6-luna")
+    assert llm_label(pi) == "gpt-6-luna via Pi (openai-codex)"  # no bogus localhost:1234
+    ollama = ModelConfig(base_url="http://172.16.209.6:11434/v1", model="gemma4:12b-mlx")
+    assert llm_label(ollama) == "gemma4:12b-mlx @ 172.16.209.6:11434"
