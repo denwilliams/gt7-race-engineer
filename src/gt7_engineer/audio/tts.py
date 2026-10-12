@@ -51,7 +51,7 @@ ENGINE_DEFAULTS = {
     "qwen3": {
         "model": "mlx-community/Qwen3-TTS-12Hz-0.6B-CustomVoice-4bit",
         "voice": "Ryan",
-        "instruct": "Calm, clear, brisk race engineer on the radio.",
+        "instruct": "Calm, steady and reassuring, like a veteran race engineer speaking on the radio.",
     },
     "kokoro": {"model": "mlx-community/Kokoro-82M-bf16", "voice": "am_adam", "instruct": ""},
 }
