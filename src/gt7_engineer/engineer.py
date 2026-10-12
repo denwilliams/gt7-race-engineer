@@ -11,7 +11,7 @@ from collections.abc import Awaitable, Callable
 from . import ui
 from .briefing import lap_update
 from .bus import PRIORITY, URGENT, Assessment, Bus
-from .llm import ChatClient
+from .llm import MAX_REPLY_TOKENS, ChatClient
 from .state import NewLap, StateStore
 
 log = logging.getLogger(__name__)
@@ -123,7 +123,7 @@ class RaceEngineer:
                     {"role": "system", "content": SYSTEM},
                     {"role": "user", "content": f"Radio the driver this in one short sentence, keeping every number: {facts} {extra}".strip()},
                 ],
-                max_tokens=80,
+                max_tokens=MAX_REPLY_TOKENS,
             )
             return text or facts
         except Exception as e:
@@ -189,7 +189,7 @@ class RaceEngineer:
             text = await self.client.chat(
                 [{"role": "system", "content": f"{SYSTEM}\nCurrent car and race state: {state}"}]
                 + self.history[-8:],
-                max_tokens=100,
+                max_tokens=MAX_REPLY_TOKENS,
             )
             return text or "Sorry, say again?"
         except Exception as e:

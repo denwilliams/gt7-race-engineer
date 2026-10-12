@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 
 from ..bus import MENTION, Assessment, Bus
-from ..llm import ChatClient
+from ..llm import MAX_REPLY_TOKENS, ChatClient
 from ..state import LapRecord, NewLap, StateStore
 from ..telemetry.packet import Frame
 
@@ -62,7 +62,7 @@ class LapTraceAgent:
         try:
             text = await self.client.chat(
                 [{"role": "system", "content": SYSTEM}, {"role": "user", "content": self.prompt(event.record)}],
-                max_tokens=120,
+                max_tokens=MAX_REPLY_TOKENS,
             )
         except Exception as e:
             log.warning("lap review failed: %s", e)

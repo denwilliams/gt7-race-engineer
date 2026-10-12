@@ -15,6 +15,9 @@ from .config import ModelConfig
 
 log = logging.getLogger(__name__)
 
+# Replies are kept short by the prompts, not by truncation. This is only a runaway guard.
+MAX_REPLY_TOKENS = 1000
+
 
 class ChatClient:
     def __init__(self, cfg: ModelConfig):
@@ -23,7 +26,7 @@ class ChatClient:
             base_url=cfg.base_url.rstrip("/"), headers=cfg.auth_headers(), timeout=cfg.timeout
         )
 
-    async def chat(self, messages: list[dict], max_tokens: int = 200, temperature: float = 0.3) -> str:
+    async def chat(self, messages: list[dict], max_tokens: int = MAX_REPLY_TOKENS, temperature: float = 0.3) -> str:
         body = {
             "model": self.cfg.model,
             "messages": messages,
@@ -129,7 +132,7 @@ class PiClient:
             parts.append(f"Reply to the latest message:\n{turns[-1]['content']}")
         return "\n\n".join(parts)
 
-    async def chat(self, messages: list[dict], max_tokens: int = 200, temperature: float = 0.3) -> str:
+    async def chat(self, messages: list[dict], max_tokens: int = MAX_REPLY_TOKENS, temperature: float = 0.3) -> str:
         async with self._lock:
             try:
                 return await asyncio.wait_for(self._chat(messages), self.cfg.timeout)
@@ -194,7 +197,7 @@ class OpenAIDecision:
             f"Answer with exactly one of: {', '.join(choices)}. Output only that word."
         )
         try:
-            out = await self.client.chat([{"role": "user", "content": prompt}], max_tokens=8, temperature=0.0)
+            out = await self.client.chat([{"role": "user", "content": prompt}], max_tokens=64, temperature=0.0)
         except Exception as e:  # network/model failure must never stop the race
             log.warning("decision model failed: %s", e)
             return self.default

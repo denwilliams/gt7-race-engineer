@@ -205,3 +205,21 @@ async def test_driver_position_is_stored_and_acknowledged():
     assert "P4" in store.summary()["current_position"]
     await eng.on_driver("what position am I in?")  # a question goes to the model, not stored
     assert store.latest_report("position").value.startswith("P4")
+
+
+async def test_replies_are_not_truncated_by_a_small_token_cap():
+    from gt7_engineer.llm import MAX_REPLY_TOKENS
+
+    caps = []
+
+    class CapClient:
+        async def chat(self, messages, max_tokens=0, **kw):
+            caps.append(max_tokens)
+            return "ok"
+
+    store, bus, said, speak = make()
+    await prime(store)
+    eng = RaceEngineer(store, bus, CapClient(), speak)
+    await eng.on_driver("how's my fuel?")
+    await eng._phrase([Assessment("fuel", "fuel", "urgent", "Fuel critical.")])
+    assert caps == [MAX_REPLY_TOKENS, MAX_REPLY_TOKENS] and MAX_REPLY_TOKENS >= 500
