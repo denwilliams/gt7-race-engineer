@@ -34,6 +34,7 @@ class TTSConfig:
     model: str = ""  # Hugging Face repo for qwen3/kokoro
     speed: float = 1.0  # say: words/min scale; kokoro: speed multiplier; qwen3: ignored
     instruct: str = ""  # qwen3 only: style instruction
+    prebuffer: float = 0.6  # seconds of audio to generate before playback starts (smooths streaming gaps)
 
 
 @dataclass

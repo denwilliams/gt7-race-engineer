@@ -57,6 +57,65 @@ ENGINE_DEFAULTS = {
 }
 
 
+def play_stream(chunks, prebuffer: float = 0.6) -> float:
+    """Play audio chunks as they are generated; returns seconds of underrun (audible gaps).
+
+    Generation runs in this thread while the sound card pulls from a buffer in its
+    own callback, so generating the next chunk overlaps with playing the last one.
+    Playback starts once `prebuffer` seconds are queued (or generation finishes).
+    """
+    import threading
+    from collections import deque
+
+    import numpy as np
+    import sounddevice as sd
+
+    buf: deque = deque()
+    lock = threading.Lock()
+    st = {"done": False, "gap": 0, "started": False}
+
+    def callback(outdata, frames, time_info, status):
+        with lock:
+            need, pos = frames, 0
+            while need and buf:
+                head = buf[0]
+                n = min(need, len(head))
+                outdata[pos : pos + n, 0] = head[:n]
+                if n == len(head):
+                    buf.popleft()
+                else:
+                    buf[0] = head[n:]
+                pos, need = pos + n, need - n
+            if need:
+                outdata[pos:, 0] = 0.0
+                if not st["done"]:
+                    st["gap"] += need
+
+    stream = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", callback=callback, latency="high")
+    queued = 0
+    try:
+        for c in chunks:
+            with lock:
+                buf.append(np.asarray(c, dtype=np.float32))
+            queued += len(c)
+            if not st["started"] and queued >= prebuffer * SAMPLE_RATE:
+                st["started"] = True
+                stream.start()
+        st["done"] = True
+        if not st["started"]:
+            stream.start()
+        while True:  # drain
+            with lock:
+                if not buf:
+                    break
+            sd.sleep(20)
+        sd.sleep(int(stream.latency * 1000) + 50)
+    finally:
+        stream.stop()
+        stream.close()
+    return st["gap"] / SAMPLE_RATE
+
+
 class MLXTTS:
     """Neural TTS through mlx-audio (requires the `audio` extra). Audio is played as it is generated."""
 
@@ -67,6 +126,8 @@ class MLXTTS:
         self.voice = cfg.voice or d["voice"]
         self.instruct = cfg.instruct or d["instruct"]
         self.speed = cfg.speed
+        self.prebuffer = cfg.prebuffer
+        self.last_underrun_s = 0.0  # seconds of silence inserted by the last utterance (stutter)
         self.streaming_interval = 0.32  # qwen3: seconds of audio per streamed chunk
         self._model = None
 
@@ -92,11 +153,7 @@ class MLXTTS:
             yield np.asarray(r.audio, dtype=np.float32).reshape(-1)
 
     def _play(self, chunks) -> None:
-        import sounddevice as sd
-
-        with sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32") as out:
-            for c in chunks:
-                out.write(c.reshape(-1, 1))
+        self.last_underrun_s = play_stream(chunks, self.prebuffer)
 
     def _speak_blocking(self, text: str) -> None:
         self._play(self._chunks(text))
