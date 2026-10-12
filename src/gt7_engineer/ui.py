@@ -9,6 +9,7 @@ from __future__ import annotations
 import logging
 import time
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 
 # kind -> (icon, rich style, plain label)
@@ -27,6 +28,62 @@ def fmt_lap(ms: int | None) -> str:
         return "-"
     m, s = divmod(ms / 1000, 60)
     return f"{int(m)}:{s:06.3f}"
+
+
+class KeyListener:
+    """Single-key shortcuts on a terminal (no Enter needed). Ctrl-C still quits as normal."""
+
+    def __init__(self, handlers: dict[str, "Callable[[], None]"]):
+        self.handlers = handlers
+        self._fd: int | None = None
+        self._old = None
+        self._loop = None
+
+    def handle(self, ch: str) -> bool:
+        fn = self.handlers.get(ch.lower())
+        if fn is None:
+            return False
+        fn()
+        return True
+
+    def _on_readable(self) -> None:
+        import os
+
+        try:
+            data = os.read(self._fd, 64)
+        except OSError:
+            return
+        for ch in data.decode(errors="ignore"):
+            self.handle(ch)
+
+    def start(self, loop) -> bool:
+        import sys
+
+        if not sys.stdin.isatty():
+            return False
+        import termios
+        import tty
+
+        self._fd, self._loop = sys.stdin.fileno(), loop
+        self._old = termios.tcgetattr(self._fd)
+        tty.setcbreak(self._fd)  # keys arrive immediately, unechoed; signals (Ctrl-C) still work
+        loop.add_reader(self._fd, self._on_readable)
+        return True
+
+    def stop(self) -> None:
+        if self._old is None:
+            return
+        import termios
+
+        try:
+            if self._loop is not None and not self._loop.is_closed():
+                self._loop.remove_reader(self._fd)
+        except Exception:
+            pass
+        try:
+            termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old)
+        finally:
+            self._old = None
 
 
 class PlainUI:
@@ -71,6 +128,7 @@ class RichUI:
         self.store = None
         self.stats = None
         self.info: dict = {}
+        self.keys: KeyListener | None = None
         self.started = time.monotonic()
         self._live = None
 
@@ -98,6 +156,9 @@ class RichUI:
         self._live.start()
 
     def close(self) -> None:
+        if self.keys is not None:
+            self.keys.stop()  # give the terminal back its normal key handling
+            self.keys = None
         if self._live is not None:
             try:
                 self._live.stop()
@@ -187,7 +248,8 @@ class RichUI:
         for k, v in self.info.items():
             if k != "ps_ip":
                 t.add_row(k, str(v))
-        t.add_row("Up", f"{int(time.monotonic() - self.started)}s   [dim]Ctrl-C to quit[/]")
+        t.add_row("Up", f"{int(time.monotonic() - self.started)}s")
+        t.add_row("Keys", "[bold]r[/] new race (reset state)   [bold]Ctrl-C[/] quit" if self.keys else "[dim]Ctrl-C to quit[/]")
         return Panel(t, title="Engineer", border_style="cyan")
 
     def _log_panel(self, rows: int):

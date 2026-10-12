@@ -16,7 +16,7 @@ from .bus import Bus
 from .config import Config
 from .engineer import RaceEngineer
 from .llm import ChatClient, JevDecision, OpenAIDecision, ThresholdDecision, make_chat
-from .state import StateStore
+from .state import NewRace, StateStore
 from .telemetry.packet import Frame
 from .telemetry.stats import IngestStats
 
@@ -44,6 +44,7 @@ async def run(
     stop_speaking: Callable[[], None] | None = None,
     interrupter: Interrupter | None = None,
     stats: IngestStats | None = None,
+    reset_request: asyncio.Event | None = None,
 ) -> StateStore:
     store, bus = StateStore(), Bus()
     stats = stats if stats is not None else IngestStats()
@@ -110,7 +111,16 @@ async def run(
     try:
         async for frame in source:
             stats.frame()
+            if reset_request is not None and reset_request.is_set():  # the driver asked (keyboard)
+                reset_request.clear()
+                store.reset()
+                engineer.reset()
+                ui.log("system", "🔄 Race state reset (you pressed r)")
             event = store.update(frame)
+            if isinstance(event, NewRace):
+                engineer.reset()
+                ui.log("system", f"🔄 New race detected ({event.reason}): state reset")
+                event = None
             if event:
                 rec = event.record
                 ui.log("lap", f"Lap {rec.lap}: {ui_fmt(rec.time_ms)}, fuel used {rec.fuel_used:.1f} L")

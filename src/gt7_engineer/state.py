@@ -11,6 +11,7 @@ FRAME_HZ = 60
 HISTORY_SECONDS = 600
 REFUEL_JUMP_L = 0.5  # a rise in fuel level bigger than this between frames means a pit stop
 POSITION_STALE_S = 5.0  # a position not refreshed for this long is no longer 'current'
+REGRESS_FRAMES = 10  # the lap number must stay below its peak this many frames in a row to count as a new race
 TREND_STEADY_PCT = 3.0  # burn changes smaller than this per lap count as steady
 
 
@@ -32,6 +33,13 @@ class DriverReport:
 
 
 @dataclass(slots=True)
+class NewRace:
+    """Emitted by StateStore.update() when the state was reset because a new race began."""
+
+    reason: str
+
+
+@dataclass(slots=True)
 class NewLap:
     """Event emitted by StateStore.update() when a lap completes."""
 
@@ -40,6 +48,9 @@ class NewLap:
 
 class StateStore:
     def __init__(self, history_seconds: int = HISTORY_SECONDS, keep_laps: int = 10):
+        self._args = (history_seconds, keep_laps)
+        self._max_lap = 0
+        self._regress = 0
         self.frames: deque[Frame] = deque(maxlen=history_seconds * FRAME_HZ)
         self.laps: deque[LapRecord] = deque(maxlen=keep_laps)
         self.reports: list[DriverReport] = []
@@ -55,7 +66,29 @@ class StateStore:
         self.position_at_lap_start: dict[int, int] = {}
 
     # ---- ingest -------------------------------------------------------
-    def update(self, f: Frame) -> NewLap | None:
+    def reset(self) -> None:
+        """Forget everything about the current race (laps, fuel, positions, driver reports, history)."""
+        self.__init__(*self._args)
+
+    def _detect_new_race(self, f: Frame) -> NewRace | None:
+        """A race restart shows up as the lap counter dropping back (e.g. 6 -> 0 or 1) and staying there."""
+        if f.lap >= self._max_lap:
+            self._max_lap, self._regress = f.lap, 0
+            return None
+        self._regress += 1
+        if self._regress < REGRESS_FRAMES:
+            return None
+        reason = f"lap counter went from {self._max_lap} back to {f.lap}"
+        self.reset()
+        self._max_lap = f.lap
+        return NewRace(reason)
+
+    def update(self, f: Frame) -> NewLap | NewRace | None:
+        race = self._detect_new_race(f)
+        event = self._ingest(f)
+        return race or event
+
+    def _ingest(self, f: Frame) -> NewLap | None:
         self.car = f
         self.frames.append(f)
         if f.race_position > 0:  # -1 in modes that don't report it
@@ -66,6 +99,8 @@ class StateStore:
                 self.start_position = f.race_position
         if not f.on_track:
             return None
+        if self._lap_frames and f.lap < self._lap_frames[-1].lap:
+            return None  # a lap number going backwards is a glitch (or a new race, handled before this): skip it
         event = None
         if self._lap_frames and f.lap > self._lap_frames[-1].lap and f.lap > 1:
             done = self._lap_frames

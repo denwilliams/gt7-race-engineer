@@ -64,7 +64,7 @@ def lap_update(store: StateStore, event: NewLap) -> str:
     parts: list[str] = []
 
     if car is not None:
-        new_lap = car.lap
+        new_lap = rec.lap + 1  # from the event itself, not the live state, which may have moved on
         parts.append(f"Lap {say_int(new_lap)}" + (f" of {say_int(car.total_laps)}" if car.total_laps else "") + ".")
 
     if rec.time_ms and rec.time_ms > 0:
@@ -98,11 +98,12 @@ def lap_update(store: StateStore, event: NewLap) -> str:
     elif car is not None and car.fuel_capacity:
         parts.append(f"Fuel {say_int(round(car.fuel))} litres.")
 
-    if store.position is not None and car is not None:
-        text = f"Position {say_int(store.position)}"
-        prev = store.position_at_lap_start.get(car.lap - 1)  # where you were when the last lap began
-        if prev is not None and prev != store.position:
-            text += f", {'up' if store.position < prev else 'down'} {say_int(abs(prev - store.position))}"
+    now_pos = store.position_at_lap_start.get(rec.lap + 1, store.position)  # where this new lap began
+    if now_pos is not None and store.position is not None and car is not None:
+        text = f"Position {say_int(now_pos)}"
+        prev = store.position_at_lap_start.get(rec.lap)  # where the lap just finished began
+        if prev is not None and prev != now_pos:
+            text += f", {'up' if now_pos < prev else 'down'} {say_int(abs(prev - now_pos))}"
         parts.append(text + ".")
     else:  # the mode doesn't report position: use what the driver said, if recent
         said = store.latest_report("position")

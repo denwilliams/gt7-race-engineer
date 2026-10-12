@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 
 from . import app, config, ui
 from .audio.tts import PrintTTS, make_tts
-from .state import StateStore
+from .state import NewRace, StateStore
 from .telemetry import ingest, simulator
 from .telemetry.stats import IngestStats
 
@@ -31,6 +31,14 @@ def _source(args, cfg, stats: IngestStats):
     if not cfg.ps_ip:
         sys.exit("Set the PlayStation IP: --ps-ip 192.168.x.x, GT7_PS_IP, or ps_ip in config.toml (or use --simulate)")
     return ingest.frames(cfg.ps_ip, stats=stats)
+
+
+def _start_keys(reset_request: asyncio.Event) -> None:
+    """`r` asks for a race-state reset. Only on the live dashboard (a real terminal)."""
+    if ui.ui.interactive:
+        keys = ui.KeyListener({"r": reset_request.set})
+        if keys.start(asyncio.get_running_loop()):
+            ui.ui.keys = keys
 
 
 def _setup_ui(args) -> None:
@@ -76,9 +84,11 @@ async def _run(args) -> None:
         await asyncio.gather(listener.warmup(), tts.warmup())  # Whisper starts loading immediately, in parallel
         speak, utterances = tts.speak, listener.utterances()
     ui.attach(stats=stats, info=info)
+    reset_request = asyncio.Event()
+    _start_keys(reset_request)
     await app.run(
         cfg, _source(args, cfg, stats), speak, utterances, use_llm=not args.no_llm, speaking=speaking,
-        stop_speaking=stop_speaking, interrupter=interrupter, stats=stats,
+        stop_speaking=stop_speaking, interrupter=interrupter, stats=stats, reset_request=reset_request,
     )
 
 
@@ -91,10 +101,19 @@ async def _watch(args) -> None:
     ui.set_mic("n/a (watch mode)", show=False)
     ui.log("system", "Watching telemetry only (no engineer, no mic).")
     n = 0
+    reset_request = asyncio.Event()
+    _start_keys(reset_request)
     async for f in _source(args, cfg, stats):
         stats.frame()
+        if reset_request.is_set():
+            reset_request.clear()
+            store.reset()
+            ui.log("system", "🔄 Race state reset (you pressed r)")
         ev = store.update(f)
         n += 1
+        if isinstance(ev, NewRace):
+            ui.log("system", f"🔄 New race detected ({ev.reason}): state reset")
+            ev = None
         if ev:
             ui.log("lap", f"Lap {ev.record.lap}: {ui.fmt_lap(ev.record.time_ms)}, fuel used {ev.record.fuel_used:.2f} L")
         if not ui.ui.interactive and n % 30 == 0:

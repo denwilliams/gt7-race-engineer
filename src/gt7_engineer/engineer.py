@@ -90,6 +90,14 @@ class RaceEngineer:
     def _now(self) -> float:
         return self.store.car.t if self.store.car else 0.0
 
+    def reset(self) -> None:
+        """A new race started: drop everything that belonged to the last one."""
+        self.pending.clear()
+        self.history.clear()
+        self.awaiting_tyre_reply = False
+        self._urgent_at.clear()
+        self._last_spoke = float("-inf")
+
     def interrupt(self) -> None:
         """The driver started talking over the engineer: cut the speech off now."""
         if self._saying and self.stop_speaking is not None:
