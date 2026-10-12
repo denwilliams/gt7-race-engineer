@@ -11,7 +11,7 @@ SAMPLE_EVERY_S = 0.1  # 10 Hz keeps lap distance accurate enough; lap/flag chang
 
 class Recorder:
     def __init__(self, path: str):
-        self._f = open(path, "w", buffering=1)
+        self._f = open(path, "w", buffering=1)  # line-buffered: every line reaches disk
         self._last_t = float("-inf")
         self._last_key: tuple | None = None
         self.written = 0
@@ -37,4 +37,5 @@ class Recorder:
         self.written += 1
 
     def close(self) -> None:
-        self._f.close()
+        if not self._f.closed:
+            self._f.close()

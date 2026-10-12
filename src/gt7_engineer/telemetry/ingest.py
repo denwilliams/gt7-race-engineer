@@ -7,7 +7,7 @@ import logging
 import time
 from collections.abc import AsyncIterator
 
-from .packet import Frame, parse
+from .packet import Frame, decode, decrypt
 from .stats import IngestStats
 
 log = logging.getLogger(__name__)
@@ -29,7 +29,7 @@ class _Protocol(asyncio.DatagramProtocol):
 
 
 async def frames(
-    ps_ip: str, recv_port: int = RECV_PORT, stats: IngestStats | None = None
+    ps_ip: str, recv_port: int = RECV_PORT, stats: IngestStats | None = None, raw_sink=None
 ) -> AsyncIterator[Frame]:
     loop = asyncio.get_running_loop()
     queue: asyncio.Queue[bytes] = asyncio.Queue(maxsize=600)
@@ -48,7 +48,11 @@ async def frames(
             data = await queue.get()
             if stats is not None:
                 stats.received += 1
-            frame = parse(data, time.monotonic())
+            now = time.monotonic()
+            plain = decrypt(data)
+            frame = decode(plain, now) if plain else None
+            if plain and raw_sink is not None:
+                raw_sink(now, plain)  # every field of every valid packet, for offline analysis
             if frame is None:
                 if stats is not None:
                     stats.rejected += 1

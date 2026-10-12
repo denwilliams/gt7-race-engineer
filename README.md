@@ -42,6 +42,8 @@ The race state resets automatically when a new race starts (the lap counter drop
 
 If you wear headphones, the mic stays open while the engineer talks and you can interrupt it by speaking (`[audio] barge_in = true`, the default). On speakers set it to `false` so the engineer can't hear itself.
 
+To keep a race for analysis: `--record-raw race.raw.jsonl.gz` saves every field of every packet (60 Hz, about 7 MB for 25 minutes) and `--record race.jsonl` saves a small readable summary (lap, fuel, position, speed, 10 Hz). Play a raw recording back through the whole app with `--replay race.raw.jsonl.gz` (`--fast` skips real-time pacing).
+
 Try it without a PlayStation, microphone or model:
 
 ```sh

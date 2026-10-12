@@ -12,8 +12,11 @@ from . import app, config, ui
 from .audio.tts import PrintTTS, make_tts
 from .recorder import Recorder
 from .state import NewRace, StateStore
-from .telemetry import ingest, simulator
+from .telemetry import ingest, packet, raw, simulator
 from .telemetry.stats import IngestStats
+
+
+_open_recorders: list = []  # closed by the Ctrl-C handler, which exits without unwinding
 
 
 def llm_label(m: config.ModelConfig) -> str:
@@ -23,15 +26,25 @@ def llm_label(m: config.ModelConfig) -> str:
     return f"{m.model} @ {urlparse(m.base_url).netloc}"
 
 
-def _source(args, cfg, stats: IngestStats):
+async def _tee_raw(frames, raw_sink):
+    """Simulated frames have no network packet: encode them so --record-raw works with --simulate too."""
+    async for f in frames:
+        raw_sink(f.t, packet.decrypt(packet.encode_packet(f)))
+        yield f
+
+
+def _source(args, cfg, stats: IngestStats, raw_sink=None):
+    if args.replay:
+        return raw.frames(args.replay, realtime=not args.fast, speedup=args.speedup)
     if args.simulate:
-        return simulator.frames(
+        frames = simulator.frames(
             lap_seconds=args.lap_seconds, total_laps=args.laps, speedup=args.speedup,
             realtime=not args.fast,
         )
+        return _tee_raw(frames, raw_sink) if raw_sink else frames
     if not cfg.ps_ip:
         sys.exit("Set the PlayStation IP: --ps-ip 192.168.x.x, GT7_PS_IP, or ps_ip in config.toml (or use --simulate)")
-    return ingest.frames(cfg.ps_ip, stats=stats)
+    return ingest.frames(cfg.ps_ip, stats=stats, raw_sink=raw_sink)
 
 
 def _start_keys(reset_request: asyncio.Event) -> None:
@@ -58,7 +71,7 @@ async def _run(args) -> None:
     stats = IngestStats()
     info = {
         "ps_ip": "simulator" if args.simulate else cfg.ps_ip,
-        "Source": "simulator" if args.simulate else f"PlayStation {cfg.ps_ip}",
+        "Source": f"replay {args.replay}" if args.replay else "simulator" if args.simulate else f"PlayStation {cfg.ps_ip}",
     }
     if not args.no_llm:
         info["LLM"] = llm_label(cfg.engineer)
@@ -88,11 +101,18 @@ async def _run(args) -> None:
     reset_request = asyncio.Event()
     _start_keys(reset_request)
     recorder = Recorder(args.record) if args.record else None
-    await app.run(
-        cfg, _source(args, cfg, stats), speak, utterances, use_llm=not args.no_llm, speaking=speaking,
-        stop_speaking=stop_speaking, interrupter=interrupter, stats=stats, reset_request=reset_request,
-        recorder=recorder,
-    )
+    raw_recorder = raw.RawRecorder(args.record_raw) if args.record_raw else None
+    _open_recorders.extend(r for r in (recorder, raw_recorder) if r is not None)
+    try:
+        await app.run(
+            cfg, _source(args, cfg, stats, raw_recorder.write if raw_recorder else None), speak, utterances,
+            use_llm=not args.no_llm, speaking=speaking, stop_speaking=stop_speaking, interrupter=interrupter,
+            stats=stats, reset_request=reset_request, recorder=recorder,
+        )
+    finally:
+        for r in (recorder, raw_recorder):
+            if r is not None:
+                r.close()
 
 
 async def _watch(args) -> None:
@@ -137,6 +157,8 @@ def main() -> None:
     p.add_argument("--no-audio", action="store_true", help="print only (simulate mode)")
     p.add_argument("--no-llm", action="store_true", help="no language model: rule-based calls only")
     p.add_argument("--record", metavar="FILE", help="write telemetry to a JSONL file for offline analysis")
+    p.add_argument("--record-raw", metavar="FILE", help="record every packet, all fields (use .jsonl.gz to compress)")
+    p.add_argument("--replay", metavar="FILE", help="play back a --record-raw file instead of a PlayStation (use --fast to skip real-time pacing)")
     p.add_argument("--plain", action="store_true", help="plain text lines instead of the live dashboard")
     p.add_argument("-v", "--verbose", action="store_true")
     args = p.parse_args()
@@ -149,6 +171,11 @@ def main() -> None:
     def stop(*_) -> None:
         # Mic, TTS and Whisper run in worker threads that block for a while; a normal
         # shutdown waits for them (hence needing Ctrl-C twice). Nothing needs flushing.
+        for r in _open_recorders:  # finish the recordings (gzip needs its trailer)
+            try:
+                r.close()
+            except Exception:
+                pass
         ui.ui.close()  # leave the dashboard's alternate screen before exiting
         print("\nStopped.", flush=True)
         os._exit(0)
