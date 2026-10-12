@@ -4,7 +4,7 @@ A fully local, voice-in/voice-out AI race engineer for Gran Turismo 7, running o
 
 It ingests GT7 UDP telemetry into a live car and race state with a rolling frame history. Background analyst agents continuously assess that data, using calculated metrics plus a local decision model to judge whether something is worth the engineer's attention. A single race engineer agent receives those assessments and decides what to say and when. It also converses with the driver by voice and gives a briefing at every new lap.
 
-Voices are switchable in config (`[tts] engine`): Qwen3-TTS 0.6B, Kokoro-82M, or the robotic macOS `say`. Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or similar), so they can be swapped. Everything runs locally by default; the optional hosted Jev decision model is the one exception and sends only the analysts' calculated numbers. Open source.
+Voices are switchable in config (`[tts] engine`): Qwen3-TTS 0.6B, Kokoro-82M, or the robotic macOS `say`. Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or similar), so they can be swapped. "Local" here means no cloud: everything runs on your Mac or on your own LAN (e.g. an Ollama server on another machine). The optional hosted Jev decision model is the one exception and sends only the analysts' calculated numbers to OpenRouter. Open source.
 
 ## v1 success criteria
 
