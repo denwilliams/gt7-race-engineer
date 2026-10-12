@@ -109,3 +109,21 @@ def test_ctrl_c_closes_recordings_so_the_gzip_is_complete(tmp_path):
     with gzip.open(out, "rt") as f:  # a properly finished gzip: reading to the end must not raise
         lines = f.read().splitlines()
     assert len(lines) > 100 and rec.stat().st_size > 0
+
+
+def test_replay_with_no_audio_never_opens_the_microphone(tmp_path):
+    import subprocess
+    import sys
+
+    path = str(tmp_path / "r.jsonl.gz")
+    subprocess.run(
+        [sys.executable, "-m", "gt7_engineer.cli", "run", "--simulate", "--fast", "--no-audio", "--no-llm", "--plain",
+         "--laps", "3", "--lap-seconds", "3", "--record-raw", path],
+        check=True, capture_output=True, timeout=60,
+    )
+    out = subprocess.run(
+        [sys.executable, "-m", "gt7_engineer.cli", "run", "--replay", path, "--fast", "--no-audio", "--no-llm", "--plain"],
+        capture_output=True, text=True, timeout=60,
+    ).stdout
+    assert "Lap two of three." in out and "🏁 Lap 1" in out
+    assert "Listening" not in out and "Loading speech" not in out  # no mic, no models

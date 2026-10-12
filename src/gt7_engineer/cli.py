@@ -81,7 +81,7 @@ async def _run(args) -> None:
         from .audio.stt import stdin_utterances
 
         speak, utterances = PrintTTS().speak, stdin_utterances()
-    elif args.simulate and args.no_audio:
+    elif (args.simulate or args.replay) and args.no_audio:
         speak, utterances = PrintTTS().speak, None
     else:
         from .audio.stt import WhisperListener
