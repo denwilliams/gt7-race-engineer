@@ -207,8 +207,11 @@ class RichUI:
             else:
                 pos = "n/a  " + sm.get("position_note", "").split("driver last said: ")[-1]
             t.add_row("Position", pos)
-            if nt := sm.get("next_turn"):
-                t.add_row("Next turn", f"T{nt['number']} {nt['direction']}  in {nt['in_m']:,} m   [dim]({nt['angle_deg']}°)[/]")
+            for k, nt in enumerate(sm.get("next_turns", [])):
+                arrow = "◀" if nt["direction"] == "L" else "▶"
+                dots = "●" * nt["severity_level"] + "○" * (5 - nt["severity_level"])
+                g = f" · ~{nt['lateral_g']} g" if "lateral_g" in nt else ""
+                t.add_row("Next turns" if k == 0 else "", f"{nt['in_m']:>5,} m  {arrow} {nt['direction']:<2} T{nt['number']:<2} {dots} {nt['severity']} · {nt['angle_deg']}°{g}")
             if sm.get("lap_progress_pct") is not None:
                 t.add_row("Lap progress", f"{_bar(sm['lap_progress_pct'] / 100, 'cyan', 16)} {sm['lap_progress_pct']}%   [dim]of {sm['lap_length_m']:,} m[/]")
             elif sm.get("lap_length_m") is None:
@@ -278,7 +281,7 @@ class RichUI:
 
         now = time.monotonic()
         height = self.console.size.height
-        top = 19
+        top = 20
         root = Layout()
         root.split_column(Layout(name="top", size=top), Layout(name="log"))
         root["top"].split_row(Layout(self._telemetry_panel(now), ratio=3), Layout(self._status_panel(), ratio=2))

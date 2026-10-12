@@ -152,7 +152,7 @@ def test_real_race_map_has_the_same_14_turns_wherever_you_look():
     assert len(tm.turns) == 14
     for t, apex, side in zip(tm.turns, REAL_APEX, REAL_SIDES):
         assert abs(t.apex_s - apex) < 30 and t.label() == side
-        assert t.seen_on >= 7  # seen on at least 7 of the 8 laps
+        assert t.seen_on >= 5  # the map froze after six laps; each turn was seen on at least five of them
 
 
 def test_real_race_map_keeps_all_14_real_turns_from_the_fourth_lap():
@@ -192,11 +192,50 @@ def test_the_state_learns_the_turns_as_clean_laps_complete():
                     mapped.append(ev)
     assert mapped and mapped[-1].turns >= 13  # four completed laps: the map is there
     sm = store.summary()
-    assert len(sm["track_turns"]) >= 13 and sm["track_turns"][0] == {"n": 1, "dir": "R", "apex_m": pytest_approx(302), "angle": pytest_approx(84)}
-    assert sm["next_turn"]["number"] >= 1 and sm["next_turn"]["in_m"] >= 0
+    first = sm["track_turns"][0]
+    assert len(sm["track_turns"]) >= 13 and (first["n"], first["dir"]) == (1, "R")
+    assert first["apex_m"] == pytest_approx(302) and first["angle"] == pytest_approx(84) and first["severity"] == "tight"
+    nts = sm["next_turns"]
+    assert len(nts) == 2 and nts[0]["in_m"] >= 0 and nts[1]["in_m"] > nts[0]["in_m"]
+    assert nts[0]["severity"] in ("hairpin", "tight", "medium", "fast", "kink") and 1 <= nts[0]["severity_level"] <= 5
 
 
 def pytest_approx(v):
     import pytest
 
     return pytest.approx(v, abs=30)
+
+
+def test_next_two_turns_with_distances_and_wrapping():
+    tm = TrackModel()
+    for lap in range(1, 4):
+        tm.add_lap(lap, synth_lap(lap))
+    (t1, d1), (t2, d2) = tm.next_turns(100, 2)
+    assert (t1.number, t2.number) == (1, 2) and d1 < d2
+    last_two = tm.next_turns(1900, 2)  # past the last turn: the next two come from the start of the next lap
+    assert [t.number for t, _ in last_two] == [1, 2] and last_two[0][1] > 500
+    near_end = tm.next_turns(1300, 2)  # turn 3 is ahead, then it wraps to turn 1
+    assert [t.number for t, _ in near_end] == [3, 1]
+
+
+def test_hardness_is_the_tightest_radius_not_the_total_angle():
+    """A long shallow bend can turn a lot without being hard; a short tight one is hard."""
+    from gt7_engineer.track import MapTurn, severity
+
+    long_shallow = MapTurn(1, 0, 150, 300, 90, +1, 5, peak_curv=1 / 300)  # 90 degrees over a wide 300 m radius
+    hairpin = MapTurn(2, 0, 30, 60, 160, +1, 5, peak_curv=1 / 30)  # 160 degrees at 30 m radius
+    assert long_shallow.severity == ("kink", 1) and hairpin.severity == ("hairpin", 5)
+    assert hairpin.lateral_g(25.0) > long_shallow.lateral_g(60.0)  # 2 g-ish vs 0.1 g
+    assert severity(55)[0] == "tight" and severity(90)[0] == "medium" and severity(150)[0] == "fast"
+
+
+def test_real_race_turn_hardness_matches_what_the_driving_shows():
+    laps = load_real()
+    tm = TrackModel()
+    for lap in sorted(laps):
+        tm.add_lap(lap, laps[lap])
+    by = {t.number: t for t in tm.turns}
+    assert by[2].severity[0] == "hairpin" and by[9].severity[0] == "hairpin"  # the two tightest (27 m, 34 m)
+    assert by[11].severity[0] == "fast" and by[10].severity[0] == "fast"  # the gentle ones
+    g = tm.typical_speed_ms(by[5])
+    assert 1.5 < by[5].lateral_g(g) < 3.2  # a race car in a 165 degree corner

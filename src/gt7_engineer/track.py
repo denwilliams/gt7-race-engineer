@@ -28,11 +28,14 @@ MIN_TURN_ANGLE_DEG = 20.0  # smaller wiggles are noise, not turns
 CORE_FRACTION = 0.4  # turn-in/exit are where the curvature reaches this share of its peak (not the long gentle approach)
 CLUSTER_TOL_M = 45.0  # the same turn on different laps lands within this
 MIN_SHARE = 0.6  # a turn must be seen on this share of laps to count
+FREEZE_SHARE = 0.75  # ...and on this share when the map is finalised, so a borderline kink is not locked in
 ZONE_PAD_M = 100.0  # comparison zone: from this far before turn-in to this far after the exit
 BRAKE_ON = 0.15
 THROTTLE_ON = 0.8
 MIN_GAIN_S = 0.15  # differences smaller than this are lap-to-lap noise
 MIN_PASSES = 5
+FREEZE_LAPS = 6  # once this many laps agree, the turn list is fixed so history stays comparable
+HISTORY_CAP = 250  # laps of per-turn history kept
 
 
 @dataclass(slots=True)
@@ -56,6 +59,17 @@ class Profile:
         return float(np.interp(dist, self.s, arr))
 
 
+# How hard a turn is, by the tightest radius of the driven line (metres)
+SEVERITY = [(40, "hairpin", 5), (70, "tight", 4), (110, "medium", 3), (200, "fast", 2), (float("inf"), "kink", 1)]
+
+
+def severity(radius_m: float) -> tuple[str, int]:
+    for limit, name, level in SEVERITY:
+        if radius_m < limit:
+            return name, level
+    return "kink", 1
+
+
 @dataclass(slots=True)
 class Turn:
     start_s: float
@@ -63,6 +77,7 @@ class Turn:
     end_s: float
     angle_deg: float  # signed heading change
     sign: int  # +1 / -1: which way the heading rotates (which side is "left" depends on the game's axes)
+    peak_curv: float = 0.0  # tightest point, rad per metre
 
     def label(self, mirror: bool = False) -> str:
         return "L" if (self.sign > 0) != mirror else "R"
@@ -77,9 +92,24 @@ class MapTurn:
     angle_deg: float
     sign: int
     seen_on: int  # laps it was detected on
+    peak_curv: float = 0.0  # tightest point, rad per metre (older saved maps lack it)
 
     def label(self, mirror: bool = False) -> str:
         return "L" if (self.sign > 0) != mirror else "R"
+
+    @property
+    def radius_m(self) -> float:
+        """Radius of the tightest part. Falls back to the average radius if the peak is unknown."""
+        if self.peak_curv > 0:
+            return 1.0 / self.peak_curv
+        return max(self.end_s - self.start_s, 1.0) / max(math.radians(abs(self.angle_deg)), 0.05)
+
+    @property
+    def severity(self) -> tuple[str, int]:
+        return severity(self.radius_m)
+
+    def lateral_g(self, speed_ms: float) -> float:
+        return speed_ms**2 / (self.radius_m * 9.81)
 
 
 @dataclass(slots=True)
@@ -171,12 +201,13 @@ def detect_turns(p: Profile) -> list[Turn]:
         cum = np.abs(np.cumsum(kappa[a : b + 1]))
         apex = a + int(np.searchsorted(cum, 0.5 * cum[-1]))
         core = np.nonzero(mag >= CORE_FRACTION * mag.max())[0]  # where it is really turning
-        turns.append(Turn(float(s[a + core[0]]), float(s[apex]), float(s[a + core[-1]]), angle, 1 if angle > 0 else -1))
+        turns.append(Turn(float(s[a + core[0]]), float(s[apex]), float(s[a + core[-1]]), angle, 1 if angle > 0 else -1,
+                          float(mag.max())))
     return turns
 
 
 # ---------------------------------------------------------------- consensus map
-def consensus(per_lap: dict[int, list[Turn]]) -> list[MapTurn]:
+def consensus(per_lap: dict[str, list[Turn]], min_share: float = MIN_SHARE) -> list[MapTurn]:
     """The turns seen on most laps, matched by position along the lap."""
     n_laps = len(per_lap)
     if n_laps == 0:
@@ -191,7 +222,7 @@ def consensus(per_lap: dict[int, list[Turn]]) -> list[MapTurn]:
                 break
         else:
             clusters.append([(lap, turn)])
-    need = max(1, math.ceil(MIN_SHARE * n_laps)) if n_laps > 2 else n_laps
+    need = max(1, math.ceil(min_share * n_laps)) if n_laps > 2 else n_laps
     kept = [c for c in clusters if len(c) >= need]
     out = []
     for k, c in enumerate(sorted(kept, key=lambda c: statistics.median(t.apex_s for _, t in c)), 1):
@@ -204,6 +235,7 @@ def consensus(per_lap: dict[int, list[Turn]]) -> list[MapTurn]:
             angle_deg=statistics.median(t.angle_deg for t in ts),
             sign=ts[0].sign,
             seen_on=len(ts),
+            peak_curv=statistics.median(t.peak_curv for t in ts),
         ))
     return out
 
@@ -304,30 +336,59 @@ def compare_passes(turn: MapTurn, passes: list[TurnPass], mirror: bool = False) 
 @dataclass
 class TrackModel:
     mirror: bool = False  # flip the L/R labels if the game's axes make them come out reversed
-    profiles: dict[int, Profile] = field(default_factory=dict)
-    per_lap: dict[int, list[Turn]] = field(default_factory=dict)
+    profiles: dict[int, Profile] = field(default_factory=dict)  # this session's laps, resampled
+    per_lap: dict[str, list[Turn]] = field(default_factory=dict)  # turns detected per lap (key: "session:lap")
     turns: list[MapTurn] = field(default_factory=list)
-    passes: dict[int, dict[int, TurnPass]] = field(default_factory=dict)  # turn number -> lap -> pass
+    passes: dict[int, dict[str, TurnPass]] = field(default_factory=dict)  # turn number -> lap key -> pass
+    frozen: bool = False  # the turn list no longer changes (enough laps agree)
+    session: str = "0"  # labels this session's laps so they stay distinct from earlier sessions'
+    length_m: float | None = None
 
     @property
     def lap_length_m(self) -> float | None:
-        return statistics.median(p.length for p in self.profiles.values()) if self.profiles else None
+        if self.profiles:
+            return statistics.median(p.length for p in self.profiles.values())
+        return self.length_m
+
+    @property
+    def laps_learned(self) -> int:
+        return len(self.per_lap)
 
     def add_lap(self, lap: int, frames: list[Frame]) -> bool:
         """Learn from a clean, complete lap. Returns True if the turn map changed."""
         prof = make_profile(frames)
+        key = f"{self.session}:{lap}"
         if prof is None or lap in self.profiles:
             return False
         self.profiles[lap] = prof
-        self.per_lap[lap] = detect_turns(prof)
+        self.length_m = self.lap_length_m
         before = [(t.number, round(t.apex_s), t.sign) for t in self.turns]
-        self.turns = consensus(self.per_lap)
-        self.passes = {t.number: {} for t in self.turns}
-        for lp, pf in self.profiles.items():  # the map may have shifted: re-measure every lap against it
+        if not self.frozen:
+            self.per_lap[key] = detect_turns(prof)
+            self.turns = consensus(self.per_lap)
+            self.passes = {t.number: {} for t in self.turns}
+            for lp, pf in self.profiles.items():  # the map may have shifted: re-measure every lap against it
+                for t in self.turns:
+                    m = measure_pass(pf, t, lp)
+                    if m is not None:
+                        self.passes.setdefault(t.number, {})[f"{self.session}:{lp}"] = m
+            if len(self.per_lap) >= FREEZE_LAPS:  # enough laps: settle the list, stricter than while learning
+                self.turns = consensus(self.per_lap, FREEZE_SHARE)
+                self.passes = {t.number: {} for t in self.turns}
+                for lp, pf in self.profiles.items():
+                    for t in self.turns:
+                        m = measure_pass(pf, t, lp)
+                        if m is not None:
+                            self.passes[t.number][f"{self.session}:{lp}"] = m
+                self.frozen = True
+        else:  # the map is settled: just measure this lap against it
             for t in self.turns:
-                m = measure_pass(pf, t, lp)
+                m = measure_pass(prof, t, lap)
                 if m is not None:
-                    self.passes[t.number][lp] = m
+                    self.passes.setdefault(t.number, {})[key] = m
+            for t, hist in self.passes.items():  # cap the history, oldest first
+                while len(hist) > HISTORY_CAP:
+                    hist.pop(next(iter(hist)))
         return before != [(t.number, round(t.apex_s), t.sign) for t in self.turns]
 
     def next_turn(self, distance_m: float) -> tuple[MapTurn, float] | None:
@@ -341,6 +402,20 @@ class TrackModel:
         t = self.turns[0]
         return t, length - distance_m + t.start_s
 
+    def next_turns(self, distance_m: float, n: int = 2) -> list[tuple[MapTurn, float]]:
+        """The next `n` turns ahead with the metres to each turn-in, wrapping round the lap."""
+        if not self.turns:
+            return []
+        length = self.lap_length_m or self.turns[-1].end_s
+        ahead = [(t, t.start_s - distance_m) for t in self.turns if t.start_s - distance_m > 0]
+        ahead += [(t, length - distance_m + t.start_s) for t in self.turns]  # the same turns again, next lap
+        return ahead[:n]
+
+    def typical_speed_ms(self, turn: MapTurn) -> float | None:
+        """The speed you usually carry at the slowest point of this turn (median over the laps driven)."""
+        speeds = [p.min_kph / 3.6 for p in self.passes.get(turn.number, {}).values()]
+        return statistics.median(speeds) if speeds else None
+
     def insights(self) -> list[Insight]:
         out = []
         for t in self.turns:
@@ -348,3 +423,36 @@ class TrackModel:
             if ins is not None:
                 out.append(ins)
         return sorted(out, key=lambda i: -i.gap_s)
+
+    # ---- saving and loading (so the next race on this track starts with everything learned so far)
+    def to_dict(self) -> dict:
+        return {
+            "frozen": self.frozen,
+            "length_m": self.lap_length_m,
+            "turns": [
+                {"number": t.number, "start_s": t.start_s, "apex_s": t.apex_s, "end_s": t.end_s,
+                 "angle_deg": t.angle_deg, "sign": t.sign, "seen_on": t.seen_on, "peak_curv": t.peak_curv}
+                for t in self.turns
+            ],
+            "per_lap": {} if self.frozen else {
+                k: [[t.start_s, t.apex_s, t.end_s, t.angle_deg, t.sign, t.peak_curv] for t in ts]
+                for k, ts in self.per_lap.items()
+            },
+            "passes": {
+                str(n): {k: [p.lap, p.zone_time, p.entry_kph, p.min_kph, p.exit_kph, p.gear, p.brake_start_m,
+                             p.brake_peak, p.throttle_pickup_m] for k, p in hist.items()}
+                for n, hist in self.passes.items()
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict, mirror: bool = False, session: str = "0") -> TrackModel:
+        tm = cls(mirror=mirror, session=session)
+        tm.frozen = bool(d.get("frozen"))
+        tm.length_m = d.get("length_m")
+        tm.turns = [MapTurn(**t) for t in d.get("turns", [])]
+        tm.per_lap = {
+            k: [Turn(*row[:4], int(row[4]), *(row[5:6])) for row in rows] for k, rows in d.get("per_lap", {}).items()
+        }
+        tm.passes = {int(n): {k: TurnPass(*v) for k, v in hist.items()} for n, hist in d.get("passes", {}).items()}
+        return tm

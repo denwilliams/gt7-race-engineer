@@ -49,6 +49,7 @@ class Frame:
     gear: int
     throttle: float  # 0..1
     brake: float  # 0..1
+    car_code: int = 0  # GT7's id for the car model (0x124); the same in every packet of a session
 
     @property
     def on_track(self) -> bool:
@@ -109,6 +110,7 @@ def decode(plain: bytes, t: float = 0.0) -> Frame:
         gear=u("<B", plain, 0x90)[0] & 0x0F,
         throttle=u("<B", plain, 0x91)[0] / 255.0,
         brake=u("<B", plain, 0x92)[0] / 255.0,
+        car_code=u("<i", plain, 0x124)[0],
     )
 
 
@@ -142,6 +144,7 @@ def encode_packet(f: Frame, iv1: int = 0x1234ABCD) -> bytes:
     p("<B", b, 0x90, f.gear & 0x0F)
     p("<B", b, 0x91, round(f.throttle * 255))
     p("<B", b, 0x92, round(f.brake * 255))
+    p("<i", b, 0x124, f.car_code)
     # Salsa20 is symmetric: "decrypting" the plaintext encrypts it. The IV
     # travels in the clear at IV_OFFSET, so it is written after encryption.
     out = bytearray(_salsa(iv1, bytes(b)))

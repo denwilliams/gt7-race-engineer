@@ -261,15 +261,24 @@ class StateStore:
         return self._lap_dist if self.car is not None and self.car.lap >= 1 and not self._lap_partial and self._lap_dist_ok else None
 
     @property
-    def next_turn(self) -> dict | None:
-        """The next turn ahead of the car and how far away turn-in is (needs the track mapped)."""
+    def next_turns(self) -> list[dict]:
+        """The next two turns ahead: where, which way, how hard (needs the track mapped)."""
         d = self.lap_distance_so_far_m
-        nxt = self.track.next_turn(d) if d is not None else None
-        if nxt is None:
-            return None
-        turn, dist = nxt
-        return {"number": turn.number, "direction": turn.label(self.track.mirror), "in_m": round(dist),
-                "angle_deg": round(abs(turn.angle_deg))}
+        if d is None:
+            return []
+        out = []
+        for turn, dist in self.track.next_turns(d, 2):
+            name, level = turn.severity
+            item = {
+                "number": turn.number, "direction": turn.label(self.track.mirror), "in_m": round(dist),
+                "angle_deg": round(abs(turn.angle_deg)), "radius_m": round(turn.radius_m),
+                "severity": name, "severity_level": level,
+            }
+            if (v := self.track.typical_speed_ms(turn)) is not None:
+                item["typical_kph"] = round(v * 3.6)
+                item["lateral_g"] = round(turn.lateral_g(v), 1)  # about, at the speed you usually carry here
+            out.append(item)
+        return out
 
     @property
     def lap_progress(self) -> float | None:
@@ -429,11 +438,12 @@ class StateStore:
         if self.track.turns:
             m = self.track.mirror
             out["track_turns"] = [
-                {"n": t.number, "dir": t.label(m), "apex_m": round(t.apex_s), "angle": round(abs(t.angle_deg))}
+                {"n": t.number, "dir": t.label(m), "apex_m": round(t.apex_s), "angle": round(abs(t.angle_deg)),
+                 "severity": t.severity[0]}
                 for t in self.track.turns
             ]
-            if (nt := self.next_turn) is not None:
-                out["next_turn"] = nt
+            if nts := self.next_turns:
+                out["next_turns"] = nts
             if ins := self.track.insights()[:4]:
                 out["turn_insights"] = [i.text for i in ins]
         if (length := self.lap_length_m) is not None:

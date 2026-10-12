@@ -4,3 +4,8 @@ __pycache__/
 .pytest_cache/
 dist/
 config.toml
+
+# raw race recordings (large, personal): keep the small fixtures in tests/data instead
+/race*.jsonl
+/race*.jsonl.gz
+/*.raw.jsonl*
