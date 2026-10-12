@@ -124,7 +124,7 @@ async def run(
             if frame.lap != last_lap_seen:  # what the game says, before any of our logic touches it
                 ui.log(
                     "system",
-                    f"lap counter {last_lap_seen} -> {frame.lap} (on track: {frame.on_track}, flags 0x{frame.flags & 0xFFFF:04x}, "
+                    f"lap counter {last_lap_seen} -> {frame.lap} (running: {frame.on_track}, flags 0x{frame.flags & 0xFFFF:04x}, "
                     f"last lap {frame.last_lap_ms} ms)",
                 )
                 last_lap_seen = frame.lap

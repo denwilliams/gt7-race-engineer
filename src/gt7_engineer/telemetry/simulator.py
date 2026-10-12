@@ -41,6 +41,8 @@ async def frames(
             phase = i / ticks
             corner = math.sin(phase * 2 * math.pi * 4)
             speed = 55 + 25 * corner  # m/s
+            if lap == 1:  # standing start: sit on the grid for 1 s, then ramp up over 2 s
+                speed *= max(0.0, min(1.0, (i - TICK_HZ) / (2 * TICK_HZ)))
             fuel -= lap_burn / ticks
             if lap == refuel_lap and i == ticks // 2:
                 fuel = start_fuel

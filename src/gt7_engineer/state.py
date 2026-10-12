@@ -59,6 +59,7 @@ class StateStore:
         self._lap_frames: list[Frame] = []
         self._lap_start_fuel: float | None = None
         self._refuelled = False
+        self._lap_partial: bool | None = None  # None until the first lap is seen; True if we joined it mid-lap
         self._prev_fuel: float | None = None
         self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
         self.fuel_at_lap_start: dict[int, float] = {}  # lap number -> litres when it began (whole race)
@@ -75,8 +76,12 @@ class StateStore:
 
     def _detect_new_race(self, f: Frame) -> NewRace | None:
         """A race restart shows up as the lap counter dropping back (e.g. 6 -> 0 or 1) and staying there."""
+        if not f.on_track:  # paused/loading frames carry no race information
+            return None
         if f.lap >= self._max_lap:
-            self._max_lap, self._regress = f.lap, 0
+            if self._max_lap == 0 or f.lap <= self._max_lap + 1:  # a jump of more than one lap is a glitch
+                self._max_lap = f.lap
+            self._regress = 0
             return None
         self._regress += 1
         if self._regress < REGRESS_FRAMES:
@@ -105,15 +110,15 @@ class StateStore:
         if self._prev_fuel is not None and f.fuel < self._prev_fuel:
             self._fuel_burned += self._prev_fuel - f.fuel
         self._prev_fuel = f.fuel
-        if self._lap_frames and f.lap < self._lap_frames[-1].lap:
-            return None  # a lap number going backwards is a glitch (or a new race, handled before this): skip it
+        if self._lap_frames and not (self._lap_frames[-1].lap <= f.lap <= self._lap_frames[-1].lap + 1):
+            return None  # lap numbers only ever go up by one: anything else is a glitch (or a new race, handled before)
         event = None
         if self._lap_frames and f.lap > self._lap_frames[-1].lap and f.lap > 1:
             done = self._lap_frames
             time_ms = f.last_lap_ms
             fuel_used = max(0.0, (self._lap_start_fuel or done[0].fuel) - done[-1].fuel)
             rec = LapRecord(
-                done[-1].lap, time_ms, fuel_used, done, burn_valid=not self._refuelled,
+                done[-1].lap, time_ms, fuel_used, done, burn_valid=not self._refuelled and not self._lap_partial,
                 fuel_start=self._lap_start_fuel or done[0].fuel,
             )
             self.laps.append(rec)
@@ -121,14 +126,17 @@ class StateStore:
             self._lap_frames = []
             self._lap_start_fuel = None
             self._refuelled = False
+            self._lap_partial = False  # every lap after a line crossing we saw is complete
         if self._lap_frames and f.fuel > self._lap_frames[-1].fuel + REFUEL_JUMP_L:
             self._refuelled = True
         if self._lap_start_fuel is None:
             self._lap_start_fuel = f.fuel
-            if f.lap >= 1:
-                self.fuel_at_lap_start[f.lap] = f.fuel
-                if self.position is not None:
-                    self.position_at_lap_start[f.lap] = self.position
+            if self._lap_partial is None:  # first lap we see: complete only if it starts from the grid
+                self._lap_partial = not (f.lap <= 1 and f.speed < 2.0)
+        if f.lap >= 1 and not self._lap_partial and f.lap not in self.fuel_at_lap_start:
+            self.fuel_at_lap_start[f.lap] = f.fuel  # first frame seen with this lap number
+            if self.position is not None:
+                self.position_at_lap_start[f.lap] = self.position
         self._lap_frames.append(f)
         return event
 
@@ -251,7 +259,7 @@ class StateStore:
             out["fuel_at_race_start_l"] = round(self.fuel_at_lap_start[min(self.fuel_at_lap_start)], 1)
         if self._fuel_burned > 0:
             out["fuel_burned_total_l"] = round(self._fuel_burned, 1)
-        if self._lap_start_fuel is not None and not self._refuelled:
+        if self._lap_start_fuel is not None and not self._refuelled and not self._lap_partial:
             out["fuel_used_this_lap_so_far_l"] = round(max(0.0, self._lap_start_fuel - c.fuel), 1)
         if self.fuel_at_lap_start:
             out["fuel_at_lap_start_l"] = {lap: round(v, 1) for lap, v in sorted(self.fuel_at_lap_start.items())}

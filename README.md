@@ -110,6 +110,8 @@ Optional. Without one, analysts use built-in threshold rules. Three ways to plug
 
 ## Telemetry limits
 
+GT7's own "car on track" flag (bit 0) is not set during real races (observed flags `0x0418` while driving), so the app treats the game as running unless the paused or loading bits are set.
+
 GT7 telemetry covers the player's own car (fuel, speeds, temperatures, lap times, lap counts). The race position and car-count fields are documented as pre-race values, but real GT7 telemetry shows them updating live, so they are used as current position. It does not provide gaps to other cars, rivals or flags, and it does not report tyre wear (the driver reports it by voice instead; the same voice report is the fallback for position in modes that don't send it).
 
 ## Non-goals (for now)

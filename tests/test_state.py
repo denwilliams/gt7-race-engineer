@@ -130,3 +130,75 @@ def test_fuel_used_this_lap_so_far():
     store, _ = run_sim(lap_seconds=3, total_laps=3, start_fuel=40.0, fuel_per_lap=7.0)
     used = store.summary()["fuel_used_this_lap_so_far_l"]
     assert 0 <= used <= 7.5
+
+
+def sim_frames(**kw):
+    async def go():
+        return [f async for f in simulator.frames(realtime=False, **kw)]
+
+    return asyncio.run(go())
+
+
+def test_laps_are_tracked_when_gt7_does_not_set_the_on_track_bit():
+    """Real PS5 data: flags 0x0418 (in gear, turbo, ASM) while racing, bit 0 clear."""
+    import dataclasses
+
+    frames = [dataclasses.replace(f, flags=0x0418) for f in sim_frames(lap_seconds=3, total_laps=4)]
+    assert not frames[0].car_on_track_bit and frames[0].on_track
+    store, events = StateStore(), []
+    for f in frames:
+        ev = store.update(f)
+        if ev:
+            events.append(ev)
+    assert [e.record.lap for e in events] == [1, 2, 3]
+
+
+def test_paused_and_loading_frames_are_ignored():
+    import dataclasses
+
+    frames = sim_frames(lap_seconds=3, total_laps=3)
+    paused = [dataclasses.replace(f, flags=f.flags | 0b10, lap=9, fuel=1.0) for f in frames[200:260]]  # bogus data
+    store = StateStore()
+    for f in frames[:200] + paused + frames[260:]:
+        store.update(f)
+    assert 9 not in store.fuel_at_lap_start and len(store.laps) == 2
+
+
+def test_joining_mid_race_does_not_poison_fuel_stats():
+    frames = [f for f in sim_frames(lap_seconds=3, total_laps=6, start_fuel=100.0, fuel_per_lap=7.0) if f.lap >= 3]
+    store, events = StateStore(), []
+    for f in frames:
+        ev = store.update(f)
+        if ev:
+            events.append(ev)
+    first, rest = events[0].record, [e.record for e in events[1:]]
+    assert first.lap == 3 and not first.burn_valid  # we only saw part of lap 3
+    assert 3 not in store.fuel_at_lap_start  # its start fuel is when we joined, not the real start
+    assert all(r.burn_valid for r in rest) and rest
+    assert abs(store.fuel_per_lap - 7.0) < 0.3  # computed from complete laps only
+
+
+def test_lap_zero_grid_then_lap_one_records_lap_one_start_fuel():
+    import dataclasses
+
+    frames = sim_frames(lap_seconds=3, total_laps=3, start_fuel=40.0)
+    grid = [dataclasses.replace(f, lap=0, speed=0.0) for f in frames[:90]]  # lap counter 0 before the start
+    store = StateStore()
+    for f in grid + frames:
+        store.update(f)
+    assert abs(store.fuel_at_lap_start[1] - 40.0) < 0.3  # recorded even though the race began at lap 0
+    assert 0 not in store.fuel_at_lap_start
+
+
+def test_a_single_garbage_upward_lap_number_does_not_freeze_tracking():
+    import dataclasses
+
+    frames = sim_frames(lap_seconds=3, total_laps=4)
+    glitch = [dataclasses.replace(f, lap=9) for f in frames[200:206]]
+    store, events = StateStore(), []
+    for f in frames[:200] + glitch + frames[206:]:
+        ev = store.update(f)
+        if ev:
+            events.append(ev)
+    assert [e.record.lap for e in events] == [1, 2, 3]  # real laps still counted, glitch never became one
+    assert max(store.fuel_at_lap_start) == 4

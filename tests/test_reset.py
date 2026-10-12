@@ -126,7 +126,8 @@ async def test_app_resets_on_new_race_and_on_request():
     assert sum("you pressed r" in t for t in system) == 1  # and the keypress reset it again
     assert not request.is_set()  # consumed
     # after the last reset only the tail of race two remains in the state
-    assert len(store.laps) <= 1 and min(store.fuel_at_lap_start) >= 2 or not store.fuel_at_lap_start
+    assert len(store.laps) <= 1
+    assert not store.fuel_at_lap_start or min(store.fuel_at_lap_start) >= 2  # joined mid-lap: nothing from before
 
 
 def test_key_listener_dispatch():

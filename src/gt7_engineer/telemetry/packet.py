@@ -52,9 +52,16 @@ class Frame:
 
     @property
     def on_track(self) -> bool:
-        return bool(self.flags & FLAG_ON_TRACK) and not self.flags & (
-            FLAG_PAUSED | FLAG_LOADING
-        )
+        """True while the session is running (not paused, not loading).
+
+        GT7's own "car on track" bit (bit 0) is NOT reliably set during real races (observed
+        flags 0x0418 while driving a race), so it is not used. See `car_on_track_bit`.
+        """
+        return not self.flags & (FLAG_PAUSED | FLAG_LOADING)
+
+    @property
+    def car_on_track_bit(self) -> bool:
+        return bool(self.flags & FLAG_ON_TRACK)
 
     @property
     def speed_kph(self) -> float:

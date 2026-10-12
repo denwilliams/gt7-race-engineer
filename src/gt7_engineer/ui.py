@@ -179,7 +179,7 @@ class RichUI:
             return "STALE", "bold red", f"no data for {age:.0f}s"
         car = self.store.car if self.store else None
         if car is not None and not car.on_track:
-            return "PAUSED", "bold yellow", f"{st.hz(now):.0f} Hz, car not on track (paused/menu/loading)"
+            return "PAUSED", "bold yellow", f"{st.hz(now):.0f} Hz, game paused or loading"
         return "LIVE", "bold green", f"{st.hz(now):.0f} Hz"
 
     def _telemetry_panel(self, now: float):
@@ -199,7 +199,7 @@ class RichUI:
             sm = self.store.summary()
             laps = f"{car.lap} / {car.total_laps}" if car.total_laps else f"{car.lap}"
             t.add_row("Lap", laps)
-            t.add_row("[dim]Raw[/]", f"[dim]lap {car.lap}  flags 0x{car.flags & 0xFFFF:04x}  {'on track' if car.on_track else 'NOT on track'}[/]")
+            t.add_row("[dim]Raw[/]", f"[dim]lap {car.lap}  flags 0x{car.flags & 0xFFFF:04x}  {'running' if car.on_track else 'paused/loading'}[/]")
             if sm.get("position"):
                 pos = f"P{sm['position']}" + (f" of {sm['cars_in_race']}" if sm.get("cars_in_race") else "")
                 if sm.get("starting_position"):

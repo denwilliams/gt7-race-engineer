@@ -51,7 +51,7 @@ async def test_every_lap_counter_change_is_logged_before_any_logic():
         ui.use(old)
     lines = [t for k, t in rec.lines if k == "system" and t.startswith("lap counter")]
     assert len(lines) == 3 and "None -> 1" in lines[0] and "1 -> 2" in lines[1] and "2 -> 3" in lines[2]
-    assert "on track: True" in lines[1] and "flags 0x" in lines[1]
+    assert "running: True" in lines[1] and "flags 0x" in lines[1]
 
 
 async def test_recorder_writes_jsonl_decimated_but_keeps_transitions(tmp_path):
@@ -74,3 +74,22 @@ def test_lap_trace_ignores_non_answers():
     for non in ("", "Nothing notable.", "No clear improvement stands out.", "No notable differences.", "nothing stands out"):
         assert is_non_answer(non), non
     assert not is_non_answer("Brake later into turn three.")
+
+
+async def test_lap_updates_are_spoken_with_the_flags_a_real_ps5_sends():
+    """Regression: real GT7 flags were 0x0418 while racing (bit 0 clear); the engineer used to stay silent."""
+    import dataclasses
+
+    said = []
+
+    async def speak(t):
+        said.append(t)
+
+    async def source():
+        async for f in simulator.frames(realtime=False, lap_seconds=3, total_laps=4):
+            yield dataclasses.replace(f, flags=0x0418)
+
+    store = await app.run(Config(), source(), speak, None, use_llm=False)
+    assert len(store.laps) == 3
+    updates = [t for t in said if t.startswith("Lap ")]
+    assert len(updates) == 3 and updates[0].startswith("Lap two of four.")
