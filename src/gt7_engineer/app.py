@@ -20,6 +20,17 @@ from .telemetry.packet import Frame
 log = logging.getLogger(__name__)
 
 
+class Interrupter:
+    """Lets the microphone (created first) reach the engineer (created inside run())."""
+
+    def __init__(self) -> None:
+        self.handler: Callable[[], None] | None = None
+
+    def fire(self) -> None:
+        if self.handler:
+            self.handler()
+
+
 async def run(
     cfg: Config,
     source: AsyncIterator[Frame],
@@ -27,6 +38,8 @@ async def run(
     utterances: AsyncIterator[str] | None = None,
     use_llm: bool = True,
     speaking: asyncio.Event | None = None,
+    stop_speaking: Callable[[], None] | None = None,
+    interrupter: Interrupter | None = None,
 ) -> StateStore:
     store, bus = StateStore(), Bus()
 
@@ -54,7 +67,11 @@ async def run(
         PaceAgent(store, bus, decision_for(pace_rule, "ignore")),
     ]
     lap_trace = LapTraceAgent(store, bus, reviewer_client) if reviewer_client else None
-    engineer = RaceEngineer(store, bus, engineer_client, speak_muted, min_gap=cfg.min_seconds_between_calls)
+    engineer = RaceEngineer(
+        store, bus, engineer_client, speak_muted, min_gap=cfg.min_seconds_between_calls, stop_speaking=stop_speaking
+    )
+    if interrupter is not None:
+        interrupter.handler = engineer.interrupt
 
     tasks = [asyncio.create_task(a.run()) for a in analysts]
     tasks.append(asyncio.create_task(engineer.run()))
@@ -65,15 +82,24 @@ async def run(
         background.add(t)
         t.add_done_callback(background.discard)
 
+    heard: asyncio.Queue[str] = asyncio.Queue()
+
     async def listen() -> None:
+        # Only capture here. Handling a sentence (LLM + speaking, 10 s+) must not hold up the
+        # microphone loop, or audio backs up and is processed late, echo and all.
         try:
             async for text in utterances:
-                await engineer.on_driver(text)
+                heard.put_nowait(text)
         except Exception:
             log.exception("microphone/speech recognition stopped; the engineer can no longer hear you")
 
+    async def respond() -> None:
+        while True:
+            await engineer.on_driver(await heard.get())
+
     if utterances is not None:
         tasks.append(asyncio.create_task(listen()))
+        tasks.append(asyncio.create_task(respond()))
 
     try:
         async for frame in source:

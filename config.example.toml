@@ -11,6 +11,11 @@ engine = "qwen3"
 # speed = 1.0           # kokoro speed multiplier; say rate scale; ignored by qwen3
 # instruct = "..."      # qwen3 only, leave unset: the 0.6B model does not follow it (and may slow speech); only 1.7B models do
 
+# Microphone. true = headphones: mic stays open while the engineer talks and you can interrupt it.
+# false = speakers: mic is muted while the engineer talks so it can't hear itself.
+[audio]
+barge_in = true
+
 # Any OpenAI-compatible endpoint: LM Studio (:1234), Ollama (:11434/v1), ...
 [engineer]
 base_url = "http://localhost:1234/v1"

@@ -29,6 +29,7 @@ async def _run(args) -> None:
     if args.ps_ip:
         cfg.ps_ip = args.ps_ip
     speaking = asyncio.Event()
+    stop_speaking = interrupter = None
     if args.text:
         from .audio.stt import stdin_utterances
 
@@ -39,7 +40,9 @@ async def _run(args) -> None:
         from .audio.stt import WhisperListener
 
         tts = make_tts(cfg.tts)
-        listener = WhisperListener(cfg.stt_model, speaking)
+        interrupter = app.Interrupter()
+        listener = WhisperListener(cfg.stt_model, speaking, interrupter.fire if cfg.audio.barge_in else None)
+        stop_speaking = tts.stop
         print(
             f"Loading speech recognition ({cfg.stt_model}) and voice ({cfg.tts.engine}); "
             "the first run downloads the models...",
@@ -52,7 +55,10 @@ async def _run(args) -> None:
             await tts.speak(text)
 
         utterances = listener.utterances()
-    await app.run(cfg, _source(args, cfg), speak, utterances, use_llm=not args.no_llm, speaking=speaking)
+    await app.run(
+        cfg, _source(args, cfg), speak, utterances, use_llm=not args.no_llm, speaking=speaking,
+        stop_speaking=stop_speaking, interrupter=interrupter,
+    )
 
 
 async def _watch(args) -> None:

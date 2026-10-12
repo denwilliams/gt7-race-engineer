@@ -34,8 +34,12 @@ class RaceEngineer:
         speak: Callable[[str], Awaitable[None]],
         min_gap: float = 8.0,
         tyre_ask_every: int = 3,
+        stop_speaking: Callable[[], None] | None = None,
     ):
         self.store, self.bus, self.client, self.speak = store, bus, client, speak
+        self.stop_speaking = stop_speaking
+        self._saying = False
+        self._interrupted = False
         self.min_gap = min_gap
         self.tyre_ask_every = tyre_ask_every
         self.pending: dict[str, Assessment] = {}  # latest per topic
@@ -50,12 +54,24 @@ class RaceEngineer:
     def _now(self) -> float:
         return self.store.car.t if self.store.car else 0.0
 
+    def interrupt(self) -> None:
+        """The driver started talking over the engineer: cut the speech off now."""
+        if self._saying and self.stop_speaking is not None:
+            self._interrupted = True
+            self.stop_speaking()
+
     async def _say(self, text: str) -> None:
         async with self._speaking:
             log.debug("ENGINEER: %s", text)
             self._last_spoke = self._now()
             self.history.append({"role": "assistant", "content": text})
-            await self.speak(text)
+            self._saying, self._interrupted = True, False
+            try:
+                await self.speak(text)
+            finally:
+                self._saying = False
+                if self._interrupted:  # the driver only heard part of it
+                    self.history[-1] = {"role": "assistant", "content": f"{text} [cut off by the driver]"}
 
     async def _phrase(self, items: list[Assessment], extra: str = "") -> str:
         facts = " ".join(a.message for a in items)

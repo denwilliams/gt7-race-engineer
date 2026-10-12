@@ -38,6 +38,13 @@ class TTSConfig:
 
 
 @dataclass
+class AudioConfig:
+    # True (headphones): the mic stays open while the engineer speaks, and talking over it cuts it off.
+    # False (speakers): the mic is muted while the engineer speaks so it can't hear itself.
+    barge_in: bool = True
+
+
+@dataclass
 class Config:
     ps_ip: str = ""
     engineer: ModelConfig = field(default_factory=ModelConfig)
@@ -45,6 +52,7 @@ class Config:
     decision: ModelConfig | None = None  # None -> rule-based thresholds only
     stt_model: str = "mlx-community/whisper-small-mlx"
     tts: TTSConfig = field(default_factory=TTSConfig)
+    audio: AudioConfig = field(default_factory=AudioConfig)
     min_seconds_between_calls: float = 8.0
 
 
@@ -67,6 +75,7 @@ def load(path: str | Path = "config.toml") -> Config:
         decision=_model(raw.get("decision"), None),
         stt_model=raw.get("stt_model", Config.stt_model),
         tts=TTSConfig(**raw.get("tts", {})),
+        audio=AudioConfig(**raw.get("audio", {})),
     )
     cfg.ps_ip = os.environ.get("GT7_PS_IP", cfg.ps_ip)
     return cfg

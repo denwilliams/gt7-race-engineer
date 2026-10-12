@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import threading
 from typing import Protocol
 
 from ..config import TTSConfig
@@ -21,14 +22,23 @@ log = logging.getLogger(__name__)
 class TTS(Protocol):
     async def speak(self, text: str) -> None: ...
 
+    def stop(self) -> None:
+        """Cut off the current utterance immediately (driver interrupted)."""
+
 
 class SayTTS:
     def __init__(self, voice: str = "Samantha", speed: float = 1.0):
         self.voice, self.rate = voice or "Samantha", round(210 * speed)
 
+    _proc = None
+
     async def speak(self, text: str) -> None:
-        proc = await asyncio.create_subprocess_exec("say", "-v", self.voice, "-r", str(self.rate), text)
-        await proc.wait()
+        self._proc = await asyncio.create_subprocess_exec("say", "-v", self.voice, "-r", str(self.rate), text)
+        await self._proc.wait()
+
+    def stop(self) -> None:
+        if self._proc is not None and self._proc.returncode is None:
+            self._proc.terminate()
 
     async def warmup(self) -> None:
         pass
@@ -36,6 +46,9 @@ class SayTTS:
 
 class PrintTTS:
     """Text-only output for development without audio."""
+
+    def stop(self) -> None:
+        pass
 
     async def speak(self, text: str) -> None:
         print(f"\n🎙  ENGINEER: {text}\n", flush=True)
@@ -57,7 +70,7 @@ ENGINE_DEFAULTS = {
 }
 
 
-def play_stream(chunks, prebuffer: float = 0.6) -> float:
+def play_stream(chunks, prebuffer: float = 0.6, stop=None, on_stream=None) -> float:
     """Play audio chunks as they are generated; returns seconds of underrun (audible gaps).
 
     Generation runs in its own thread and this thread only does blocking
@@ -65,6 +78,10 @@ def play_stream(chunks, prebuffer: float = 0.6) -> float:
     in one thread, or feeding the device from a Python callback, produced audible
     stutter at the start of every phrase.) Playback starts once `prebuffer`
     seconds are queued, or when generation finishes.
+
+    `stop` (a threading.Event) ends playback early: generation is abandoned and the
+    sound card's buffer is discarded so audio cuts out at once. `on_stream` receives the
+    open stream so another thread can abort it.
     """
     import queue
     import threading
@@ -78,6 +95,8 @@ def play_stream(chunks, prebuffer: float = 0.6) -> float:
     def produce() -> None:
         try:
             for c in chunks:
+                if stop is not None and stop.is_set():
+                    break
                 q.put(np.asarray(c, dtype=np.float32).reshape(-1, 1))
         except BaseException as e:  # surface generation failures to the caller
             error.append(e)
@@ -87,7 +106,7 @@ def play_stream(chunks, prebuffer: float = 0.6) -> float:
     threading.Thread(target=produce, daemon=True).start()
 
     pending, queued, ended = [], 0, False
-    while queued < prebuffer * SAMPLE_RATE:
+    while queued < prebuffer * SAMPLE_RATE and not (stop is not None and stop.is_set()):
         c = q.get()
         if c is None:
             ended = True
@@ -96,21 +115,32 @@ def play_stream(chunks, prebuffer: float = 0.6) -> float:
         queued += len(c)
 
     underflows = 0
-    if pending:
+    stopped = lambda: stop is not None and stop.is_set()  # noqa: E731
+    if pending and not stopped():
         out = sd.OutputStream(samplerate=SAMPLE_RATE, channels=1, dtype="float32", latency="high")
+        if on_stream:
+            on_stream(out)
         out.start()
         try:
             for c in pending:
+                if stopped():
+                    break
                 underflows += bool(out.write(c))
-            while not ended:
+            while not ended and not stopped():
                 c = q.get()
                 if c is None:
                     break
                 underflows += bool(out.write(c))
+        except sd.PortAudioError:
+            if not stopped():  # an abort() from stop() surfaces here; anything else is real
+                raise
         finally:
-            out.stop()
+            if stopped():
+                out.abort()  # discard buffered audio
+            else:
+                out.stop()
             out.close()
-    if error:
+    if error and not stopped():
         raise error[0]
     if underflows:
         log.warning("TTS playback underflowed %d time(s); try a larger prebuffer", underflows)
@@ -130,6 +160,8 @@ class MLXTTS:
         self.prebuffer = cfg.prebuffer
         self.last_underrun_s = 0.0  # device underflow count for the last utterance (0 = clean)
         self._model = None
+        self._stop = threading.Event()
+        self._out = None  # the open output stream, so stop() can abort it
 
     def _load(self):
         if self._model is None:
@@ -153,12 +185,23 @@ class MLXTTS:
             yield np.asarray(r.audio, dtype=np.float32).reshape(-1)
 
     def _play(self, chunks) -> None:
-        self.last_underrun_s = play_stream(chunks, self.prebuffer)
+        self.last_underrun_s = play_stream(chunks, self.prebuffer, self._stop, lambda out: setattr(self, "_out", out))
+
+    def stop(self) -> None:
+        self._stop.set()
+        out = self._out
+        if out is not None:
+            try:
+                out.abort()  # unblocks a write() in progress and drops buffered audio
+            except Exception:
+                pass
 
     def _speak_blocking(self, text: str) -> None:
         self._play(self._chunks(text))
 
     async def speak(self, text: str) -> None:
+        self._stop.clear()
+        self._out = None
         await asyncio.get_running_loop().run_in_executor(None, self._speak_blocking, text)
 
     async def warmup(self) -> None:

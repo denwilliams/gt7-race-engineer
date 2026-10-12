@@ -132,3 +132,24 @@ async def test_tyre_statements_vs_questions():
     assert store.latest_report("tyre_wear") is None  # a question, not a report
     await eng.on_driver("fronts are at sixty percent, rears seventy")
     assert store.latest_report("tyre_wear").value.startswith("fronts")
+
+
+async def test_microphone_keeps_reading_while_engineer_is_busy():
+    import time
+
+    resumed = []
+    said = []
+
+    async def slow_speak(t):
+        said.append(t)
+        await asyncio.sleep(0.6)  # speaking takes a while
+
+    async def heard():
+        yield "how is my fuel"
+        resumed.append(time.monotonic())  # generator resumed = mic loop reading again
+        yield "and the tyres"
+
+    start = time.monotonic()
+    src = simulator.frames(realtime=False, lap_seconds=2, total_laps=3)
+    await app.run(Config(), src, slow_speak, heard(), use_llm=False)
+    assert resumed and resumed[0] - start < 0.3  # not blocked behind the 0.6 s reply
