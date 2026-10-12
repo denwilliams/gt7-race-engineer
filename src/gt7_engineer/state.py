@@ -10,9 +10,10 @@ from .timefmt import fmt_lap
 
 FRAME_HZ = 60
 HISTORY_SECONDS = 600
-REFUEL_JUMP_L = 0.5  # a rise in fuel level bigger than this between frames means a pit stop
+REFUEL_JUMP_L = 1.0  # a rise above the lowest recent level by more than this is a pit stop; smaller blips are sensor noise (real GT7 jitters up to ~0.4 L)
 POSITION_STALE_S = 5.0  # a position not refreshed for this long is no longer 'current'
 REGRESS_FRAMES = 10  # the lap number must stay below its peak this many frames in a row to count as a new race
+MIN_ESTIMATE_S = 20.0  # observed running time needed before burn-rate extrapolation is trusted
 TREND_STEADY_PCT = 3.0  # burn changes smaller than this per lap count as steady
 
 
@@ -61,7 +62,10 @@ class StateStore:
         self._refuelled = False
         self._lap_partial: bool | None = None  # None until the first lap is seen; True if we joined it mid-lap
         self._prev_fuel: float | None = None
+        self._lap_min_fuel = float("inf")  # lowest fuel level seen this lap (to tell refuels from jitter)
         self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
+        self._observed_s = 0.0  # running time we have actually watched (for the burn-rate estimate)
+        self._prev_t: float | None = None
         self.fuel_at_lap_start: dict[int, float] = {}  # lap number -> litres when it began (whole race)
         self._position: int | None = None  # last position reported by telemetry
         self._position_t = 0.0
@@ -107,9 +111,15 @@ class StateStore:
                 self.start_position = f.race_position
         if not f.on_track:
             return None
-        if self._prev_fuel is not None and f.fuel < self._prev_fuel:
+        if self._prev_t is not None:
+            self._observed_s += min(1.0, max(0.0, f.t - self._prev_t))  # gaps in the stream don't count as time
+        self._prev_t = f.t
+        if self._prev_fuel is None or f.fuel - self._prev_fuel >= REFUEL_JUMP_L:
+            self._prev_fuel = f.fuel  # first reading, or a real refuel: new baseline
+        elif f.fuel < self._prev_fuel:
             self._fuel_burned += self._prev_fuel - f.fuel
-        self._prev_fuel = f.fuel
+            self._prev_fuel = f.fuel
+        # a small rise is jitter: keep the lower baseline so the same litres are not counted twice
         if self._lap_frames and not (self._lap_frames[-1].lap <= f.lap <= self._lap_frames[-1].lap + 1):
             return None  # lap numbers only ever go up by one: anything else is a glitch (or a new race, handled before)
         event = None
@@ -125,10 +135,12 @@ class StateStore:
             event = NewLap(rec)
             self._lap_frames = []
             self._lap_start_fuel = None
+            self._lap_min_fuel = float("inf")
             self._refuelled = False
             self._lap_partial = False  # every lap after a line crossing we saw is complete
-        if self._lap_frames and f.fuel > self._lap_frames[-1].fuel + REFUEL_JUMP_L:
+        if self._lap_frames and f.fuel > self._lap_min_fuel + REFUEL_JUMP_L:
             self._refuelled = True
+        self._lap_min_fuel = min(self._lap_min_fuel, f.fuel)
         if self._lap_start_fuel is None:
             self._lap_start_fuel = f.fuel
             if self._lap_partial is None:  # first lap we see: complete only if it starts from the grid
@@ -198,9 +210,25 @@ class StateStore:
 
     @property
     def fuel_per_lap(self) -> float | None:
-        """Mean fuel burn over the last few valid laps."""
+        """Mean fuel burn over the last few complete laps, or an estimate until one is available."""
         b = self.burns[-3:]
-        return sum(b) / len(b) if b else None
+        return sum(b) / len(b) if b else self.estimated_fuel_per_lap
+
+    @property
+    def fuel_per_lap_is_estimate(self) -> bool:
+        return not self.burns and self.estimated_fuel_per_lap is not None
+
+    @property
+    def estimated_fuel_per_lap(self) -> float | None:
+        """Burn rate (litres per second watched) times the last lap time.
+
+        Lets the engineer talk about fuel straight away after joining mid-race, before a
+        complete lap has been seen. Needs a last lap time and some watched burn.
+        """
+        c = self.car
+        if c is None or c.last_lap_ms <= 0 or self._observed_s < MIN_ESTIMATE_S or self._fuel_burned < 0.5:
+            return None
+        return self._fuel_burned / self._observed_s * c.last_lap_ms / 1000
 
     @property
     def burn_trend(self) -> tuple[float, str] | None:
@@ -238,6 +266,7 @@ class StateStore:
             "fuel_l": round(c.fuel, 1),
             "fuel_pct": round(100 * c.fuel / c.fuel_capacity) if c.fuel_capacity else None,
             "fuel_per_lap_l": round(fpl, 2) if fpl else None,
+            "fuel_per_lap_is_estimate": self.fuel_per_lap_is_estimate or None,
             # formatted as m:ss.mmm so the model reads them instead of converting raw milliseconds
             "last_lap_time": fmt_lap(c.last_lap_ms) if c.last_lap_ms > 0 else None,
             "best_lap_time": fmt_lap(c.best_lap_ms) if c.best_lap_ms > 0 else None,

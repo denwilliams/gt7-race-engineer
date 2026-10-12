@@ -84,7 +84,8 @@ def lap_update(store: StateStore, event: NewLap) -> str:
     if car is not None and fpl:
         laps_of_fuel = car.fuel / fpl
         left = store.laps_remaining
-        fuel = f"Fuel {say_num(laps_of_fuel)} laps" + (f", {say_int(left)} to go." if left is not None else ".")
+        about = "about " if store.fuel_per_lap_is_estimate else ""
+        fuel = f"Fuel {about}{say_num(laps_of_fuel)} laps" + (f", {say_int(left)} to go." if left is not None else ".")
         if left is not None:
             margin = laps_of_fuel - left
             if margin < 0:
