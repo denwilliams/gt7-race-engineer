@@ -23,6 +23,32 @@ SYSTEM = (
 
 TYRE_WORDS = re.compile(r"\b(tyres?|tires?|wear|fronts?|rears?)\b", re.I)
 TYRE_QUESTION = "How are the tyres looking?"
+ORDINALS = {
+    "first": 1, "second": 2, "third": 3, "fourth": 4, "fifth": 5, "sixth": 6, "seventh": 7, "eighth": 8,
+    "ninth": 9, "tenth": 10, "eleventh": 11, "twelfth": 12, "thirteenth": 13, "fourteenth": 14, "fifteenth": 15,
+    "sixteenth": 16,
+}
+_ORD = "|".join(ORDINALS)
+
+
+def parse_position(text: str) -> int | None:
+    """Race position the driver states: 'P3', 'position 3', 'I'm in third', '3rd place'. None for questions."""
+    if "?" in text or QUESTION.match(text):
+        return None
+    t = text.lower()
+    m = (
+        re.search(r"\bp\s?(\d{1,2})\b", t)
+        or re.search(r"\b(?:position|place)\s+(?:number\s+)?(\d{1,2})\b", t)
+        or re.search(r"\b(\d{1,2})(?:st|nd|rd|th)\b", t)
+    )
+    if m:
+        return int(m.group(1))
+    m = re.search(rf"\b({_ORD})\b(?:\s+place|\s+position)?", t)
+    if m and re.search(r"\b(i'?m|i am|in|currently|now|running|sitting|position|place)\b", t):
+        return ORDINALS[m.group(1)]
+    return None
+
+
 QUESTION = re.compile(r"\s*(how|what|when|where|why|which|who|can|could|should|do|does|is|are|will)\b", re.I)
 
 
@@ -137,6 +163,11 @@ class RaceEngineer:
             return
         log.debug("DRIVER: %s", text)
         self.history.append({"role": "user", "content": text})
+        pos = parse_position(text)
+        if pos is not None and not self.awaiting_tyre_reply:
+            self.store.add_report("position", f"P{pos} at lap {self.store.lap}")
+            await self._say(f"Copy, P{pos}.")
+            return
         if self.awaiting_tyre_reply or (TYRE_WORDS.search(text) and not QUESTION.match(text) and "?" not in text):
             self.awaiting_tyre_reply = False
             self.store.add_report("tyre_wear", text)

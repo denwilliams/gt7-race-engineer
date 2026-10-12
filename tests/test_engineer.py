@@ -153,3 +153,23 @@ async def test_microphone_keeps_reading_while_engineer_is_busy():
     src = simulator.frames(realtime=False, lap_seconds=2, total_laps=3)
     await app.run(Config(), src, slow_speak, heard(), use_llm=False)
     assert resumed and resumed[0] - start < 0.3  # not blocked behind the 0.6 s reply
+
+
+def test_parse_position():
+    from gt7_engineer.engineer import parse_position as pp
+
+    assert pp("I'm in P3") == 3 and pp("position 4 now") == 4 and pp("third place") == 3
+    assert pp("I'm in second") == 2 and pp("we are 5th") == 5
+    assert pp("what position am I in?") is None and pp("how is my fuel") is None
+    assert pp("fronts at sixty percent") is None
+
+
+async def test_driver_position_is_stored_and_acknowledged():
+    store, bus, said, speak = make()
+    await prime(store)
+    eng = RaceEngineer(store, bus, FakeClient("ok"), speak)
+    await eng.on_driver("I'm P4 right now")
+    assert said == ["Copy, P4."]
+    assert "P4" in store.summary()["current_position"]
+    await eng.on_driver("what position am I in?")  # a question goes to the model, not stored
+    assert store.latest_report("position").value.startswith("P4")

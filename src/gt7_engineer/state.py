@@ -20,6 +20,7 @@ class LapRecord:
     fuel_used: float
     frames: list[Frame] = field(repr=False, default_factory=list)
     burn_valid: bool = True  # False if the car refuelled during the lap (pit stop)
+    fuel_start: float = 0.0  # fuel level (litres) when the lap began
 
 
 @dataclass(slots=True)
@@ -45,11 +46,16 @@ class StateStore:
         self._lap_frames: list[Frame] = []
         self._lap_start_fuel: float | None = None
         self._refuelled = False
+        self.fuel_at_lap_start: dict[int, float] = {}  # lap number -> litres when it began (whole race)
+        self.start_position: int | None = None  # grid position, only reported by GT7 before the race starts
+        self.num_cars: int | None = None
 
     # ---- ingest -------------------------------------------------------
     def update(self, f: Frame) -> NewLap | None:
         self.car = f
         self.frames.append(f)
+        if f.start_position > 0:  # GT7 reports -1 once the race has started, so remember it
+            self.start_position, self.num_cars = f.start_position, f.num_cars if f.num_cars > 0 else self.num_cars
         if not f.on_track:
             return None
         event = None
@@ -57,7 +63,10 @@ class StateStore:
             done = self._lap_frames
             time_ms = f.last_lap_ms
             fuel_used = max(0.0, (self._lap_start_fuel or done[0].fuel) - done[-1].fuel)
-            rec = LapRecord(done[-1].lap, time_ms, fuel_used, done, burn_valid=not self._refuelled)
+            rec = LapRecord(
+                done[-1].lap, time_ms, fuel_used, done, burn_valid=not self._refuelled,
+                fuel_start=self._lap_start_fuel or done[0].fuel,
+            )
             self.laps.append(rec)
             event = NewLap(rec)
             self._lap_frames = []
@@ -67,8 +76,14 @@ class StateStore:
             self._refuelled = True
         if self._lap_start_fuel is None:
             self._lap_start_fuel = f.fuel
+            if f.lap >= 1:
+                self.fuel_at_lap_start[f.lap] = f.fuel
         self._lap_frames.append(f)
         return event
+
+    def fuel_at_start_of(self, lap: int) -> float | None:
+        """Litres in the tank when `lap` began (None if that lap hasn't started or wasn't seen)."""
+        return self.fuel_at_lap_start.get(lap)
 
     def add_report(self, kind: str, value: str, t: float | None = None) -> None:
         self.reports.append(DriverReport(t if t is not None else self.car.t if self.car else 0.0, kind, value))
@@ -171,6 +186,16 @@ class StateStore:
         out["fuel_burn_last_laps_l"] = [round(x, 2) for x in self.burns]
         if (trend := self.burn_trend) is not None:
             out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L/lap every lap)"
+        if self.fuel_at_lap_start:
+            out["fuel_at_lap_start_l"] = {lap: round(v, 1) for lap, v in sorted(self.fuel_at_lap_start.items())}
+        if self.start_position:
+            out["starting_position"] = self.start_position
+            if self.num_cars:
+                out["cars_in_race"] = self.num_cars
+        pos = self.latest_report("position")
+        out["current_position"] = (
+            f"not in telemetry; driver last said: {pos.value}" if pos else "unknown (GT7 telemetry does not provide it; ask the driver)"
+        )
         wear = self.latest_report("tyre_wear")
         if wear:
             out["driver_reported_tyre_wear"] = wear.value

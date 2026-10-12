@@ -68,3 +68,33 @@ def test_summary_has_fuel_margin():
     sm = store.summary()
     assert sm["laps_remaining_including_current"] == 1  # final lap in progress
     assert "fuel_margin_laps" in sm
+
+
+def test_fuel_at_start_of_each_lap():
+    store, events = run_sim(lap_seconds=3, total_laps=5, start_fuel=40.0, fuel_per_lap=7.0)
+    starts = store.fuel_at_lap_start
+    assert sorted(starts) == [1, 2, 3, 4, 5]  # every lap seen, including the one in progress
+    for lap in range(1, 6):
+        assert abs(starts[lap] - (40.0 - 7.0 * (lap - 1))) < 0.4
+    assert store.fuel_at_start_of(3) == starts[3] and store.fuel_at_start_of(9) is None
+    assert [round(e.record.fuel_start) for e in events] == [40, 33, 26, 19]  # on each completed lap too
+    assert store.summary()["fuel_at_lap_start_l"][2] == round(starts[2], 1)
+
+
+def test_fuel_at_lap_start_after_pit_stop_shows_the_refuel():
+    store, _ = run_sim(lap_seconds=3, total_laps=6, start_fuel=40.0, fuel_per_lap=7.0, refuel_lap=3)
+    assert store.fuel_at_start_of(4) > store.fuel_at_start_of(3)  # tank is fuller after the stop
+
+
+def test_start_position_is_remembered_after_gt7_stops_reporting_it():
+    store, _ = run_sim(lap_seconds=3, total_laps=3)
+    assert store.car.start_position == -1  # live frames no longer carry it, as in real GT7
+    sm = store.summary()
+    assert sm["starting_position"] == 3 and sm["cars_in_race"] == 12
+    assert "not in telemetry" in sm["current_position"] or "unknown" in sm["current_position"]
+
+
+def test_driver_reported_position_reaches_summary():
+    store, _ = run_sim(lap_seconds=3, total_laps=3)
+    store.add_report("position", "P2 at lap 2")
+    assert "P2 at lap 2" in store.summary()["current_position"]

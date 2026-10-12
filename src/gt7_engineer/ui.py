@@ -143,6 +143,10 @@ class RichUI:
             sm = self.store.summary()
             laps = f"{car.lap} / {car.total_laps}" if car.total_laps else f"{car.lap}"
             t.add_row("Lap", laps)
+            grid = f"P{sm['starting_position']}" + (f" of {sm['cars_in_race']}" if sm.get("cars_in_race") else "") if sm.get("starting_position") else "?"
+            now_pos = sm.get("current_position", "")
+            now_pos = now_pos.split("driver last said: ")[1] if "driver last said" in now_pos else "n/a (not in GT7 telemetry)"
+            t.add_row("Position", f"start {grid}   now {now_pos}")
             t.add_row("Speed", f"{sm['speed_kph']} km/h   gear {car.gear}   {car.rpm:.0f} rpm")
             t.add_row("Throttle", _bar(car.throttle, "green") + "   Brake " + _bar(car.brake, "red"))
             fuel = f"{sm['fuel_l']} L"
@@ -156,6 +160,9 @@ class RichUI:
                 t.add_row("", f"[{col}]{sm['laps_of_fuel']} laps of fuel{extra}[/]")
             if sm.get("fuel_per_lap_l"):
                 t.add_row("Burn", f"{sm['fuel_per_lap_l']} L/lap   {sm.get('fuel_burn_trend', '')}")
+            if sm.get("fuel_at_lap_start_l"):
+                starts = list(sm["fuel_at_lap_start_l"].items())[-6:]
+                t.add_row("Fuel @ lap start", "  ".join(f"L{lap} {v}" for lap, v in starts))
             t.add_row("Last / best", f"{fmt_lap(car.last_lap_ms)} / {fmt_lap(car.best_lap_ms)}")
             fl, fr, rl, rr = (round(x) for x in car.tyre_temp)
             t.add_row("Tyres °C", f"FL {fl}  FR {fr}\n RL {rl}  RR {rr}")
@@ -203,7 +210,7 @@ class RichUI:
 
         now = time.monotonic()
         height = self.console.size.height
-        top = 14
+        top = 16
         root = Layout()
         root.split_column(Layout(name="top", size=top), Layout(name="log"))
         root["top"].split_row(Layout(self._telemetry_panel(now), ratio=3), Layout(self._status_panel(), ratio=2))

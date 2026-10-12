@@ -57,8 +57,8 @@ async def frames(
                 total_laps=total_laps,
                 best_lap_ms=best,
                 last_lap_ms=last,
-                start_position=3,
-                num_cars=12,
+                start_position=3 if packet_id <= 30 else -1,  # GT7: -1 once the race has started
+                num_cars=12 if packet_id <= 30 else -1,
                 flags=FLAG_ON_TRACK,
                 gear=3 + int(2 * (corner + 1) / 2),
                 throttle=max(0.0, corner),
