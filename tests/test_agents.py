@@ -129,3 +129,36 @@ def test_fuel_agent_reports_heavier_burn():
     last = msgs[-1]
     assert last.data["burn_trend"] == "heavier" and last.data["burn_change_per_lap_l"] > 0
     assert "getting heavier" in last.message and "last lap" in last.message
+
+
+def test_tts_engine_selection_and_playback_path():
+    import numpy as np
+
+    from gt7_engineer.audio.tts import MLXTTS, SayTTS, make_tts
+    from gt7_engineer.config import TTSConfig
+
+    assert isinstance(make_tts(TTSConfig(engine="say")), SayTTS)
+    q, k = make_tts(TTSConfig(engine="qwen3")), make_tts(TTSConfig(engine="kokoro"))
+    assert isinstance(q, MLXTTS) and "Qwen3-TTS" in q.model_id and q.voice == "Ryan"
+    assert isinstance(k, MLXTTS) and "Kokoro" in k.model_id and k.voice == "am_adam"
+    assert make_tts(TTSConfig(engine="kokoro", voice="af_heart")).voice == "af_heart"
+
+    class R:  # stand-in for an mlx-audio result
+        audio = np.ones(4)
+
+    class FakeModel:
+        def generate_custom_voice(self, **kw):
+            assert kw["speaker"] == "Ryan" and kw["stream"] is True
+            yield R()
+            yield R()
+
+        def generate(self, **kw):
+            assert kw["voice"] == "am_adam" and kw["lang_code"] == "a"
+            yield R()
+
+    played = []
+    for tts, n in ((q, 2), (k, 1)):
+        tts._model = FakeModel()
+        tts._play = lambda chunks, played=played: played.append(list(chunks))
+        asyncio.run(tts.speak("hello"))
+        assert len(played[-1]) == n and played[-1][0].dtype == np.float32

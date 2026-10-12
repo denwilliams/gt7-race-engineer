@@ -14,6 +14,8 @@ audio = [
     "sounddevice>=0.4.7",
     "numpy>=1.26",
     "mlx-whisper>=0.4",
+    "mlx-audio>=0.5.8",
+    "misaki[en]>=0.9.4",
 ]
 
 [project.scripts]

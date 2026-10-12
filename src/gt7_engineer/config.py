@@ -25,13 +25,24 @@ class ModelConfig:
 
 
 @dataclass
+class TTSConfig:
+    """Text-to-speech engine. Empty fields take the engine's default."""
+
+    engine: str = "say"  # "say" (macOS, robotic) | "qwen3" | "kokoro"
+    voice: str = ""  # say: "Samantha"; kokoro: "am_adam"; qwen3: "Ryan"
+    model: str = ""  # Hugging Face repo for qwen3/kokoro
+    speed: float = 1.0  # say: words/min scale; kokoro: speed multiplier; qwen3: ignored
+    instruct: str = ""  # qwen3 only: style instruction
+
+
+@dataclass
 class Config:
     ps_ip: str = ""
     engineer: ModelConfig = field(default_factory=ModelConfig)
     lap_reviewer: ModelConfig = field(default_factory=ModelConfig)
     decision: ModelConfig | None = None  # None -> rule-based thresholds only
     stt_model: str = "mlx-community/whisper-small-mlx"
-    tts_voice: str = "Samantha"
+    tts: TTSConfig = field(default_factory=TTSConfig)
     min_seconds_between_calls: float = 8.0
 
 
@@ -53,7 +64,7 @@ def load(path: str | Path = "config.toml") -> Config:
         lap_reviewer=_model(raw.get("lap_reviewer"), _model(raw.get("engineer"), base)),
         decision=_model(raw.get("decision"), None),
         stt_model=raw.get("stt_model", Config.stt_model),
-        tts_voice=raw.get("tts_voice", Config.tts_voice),
+        tts=TTSConfig(**raw.get("tts", {})),
     )
     cfg.ps_ip = os.environ.get("GT7_PS_IP", cfg.ps_ip)
     return cfg

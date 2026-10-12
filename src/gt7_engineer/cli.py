@@ -6,7 +6,7 @@ import logging
 import sys
 
 from . import app, config
-from .audio.tts import PrintTTS, SayTTS
+from .audio.tts import PrintTTS, make_tts
 from .state import StateStore
 from .telemetry import ingest, simulator
 
@@ -36,7 +36,10 @@ async def _run(args) -> None:
     else:
         from .audio.stt import WhisperListener
 
-        speak, utterances = SayTTS(cfg.tts_voice).speak, WhisperListener(cfg.stt_model, speaking).utterances()
+        tts = make_tts(cfg.tts)
+        print(f"Loading voice ({cfg.tts.engine})...", flush=True)
+        await tts.warmup()
+        speak, utterances = tts.speak, WhisperListener(cfg.stt_model, speaking).utterances()
     await app.run(cfg, _source(args, cfg), speak, utterances, use_llm=not args.no_llm, speaking=speaking)
 
 

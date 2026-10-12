@@ -1,7 +1,15 @@
 # Copy to config.toml (git-ignored). Everything is optional; env GT7_PS_IP overrides ps_ip.
 ps_ip = "192.168.1.50"          # PlayStation IP (GT7 > Settings > Network shows it)
 stt_model = "mlx-community/whisper-small-mlx"
-tts_voice = "Samantha"          # any `say -v ?` voice
+
+# Voice. engine: "say" (macOS, robotic) | "qwen3" (Qwen3-TTS 0.6B) | "kokoro" (Kokoro-82M).
+# Everything else is optional; each engine has sensible defaults. First run downloads the model.
+[tts]
+engine = "qwen3"
+# voice = "Ryan"        # say: `say -v ?`; kokoro: "am_adam", "af_heart", ...; qwen3: "Ryan", "Vivian", "Serena", ...
+# model = "..."         # Hugging Face repo id, to use another size/quantisation
+# speed = 1.0           # kokoro speed multiplier; say rate scale; ignored by qwen3
+# instruct = "..."      # qwen3 only: speaking style
 
 # Any OpenAI-compatible endpoint: LM Studio (:1234), Ollama (:11434/v1), ...
 [engineer]

@@ -4,7 +4,7 @@ A fully local, voice-in/voice-out AI race engineer for Gran Turismo 7, running o
 
 It ingests GT7 UDP telemetry into a live car and race state with a rolling frame history. Background analyst agents continuously assess that data, using calculated metrics plus a local decision model to judge whether something is worth the engineer's attention. A single race engineer agent receives those assessments and decides what to say and when. It also converses with the driver by voice and gives a briefing at every new lap.
 
-Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or similar), so they can be swapped. Everything runs locally by default; the optional hosted Jev decision model is the one exception and sends only the analysts' calculated numbers. Open source.
+Voices are switchable in config (`[tts] engine`): Qwen3-TTS 0.6B, Kokoro-82M, or the robotic macOS `say`. Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or similar), so they can be swapped. Everything runs locally by default; the optional hosted Jev decision model is the one exception and sends only the analysts' calculated numbers. Open source.
 
 ## v1 success criteria
 
@@ -77,6 +77,7 @@ PS5 --UDP--> Telemetry ingest (decrypt/decode)
 - **Lap-trace agent.** At the end of each lap, a chat LLM reviews that lap's telemetry and publishes a coaching assessment.
 - **Race engineer.** The only voice. Receives all assessments and rate-limits, prioritises and decides when to speak. Answers the driver and is pinged at each new lap for an update.
 - **Driver-reported data.** Where telemetry has gaps, the engineer asks the driver. Tyre wear isn't in GT7 telemetry, so the engineer can ask for it (e.g. "how are the fronts looking?"), and the spoken answer is parsed and stored in the race state with a timestamp, so analysts can use it like any other input.
+- **Voice.** `[tts] engine = "qwen3" | "kokoro" | "say"`. The neural engines run through mlx-audio, stream audio as it is generated and are warmed up at startup (first call is much slower). The first run downloads the model.
 - **Models.** Every LLM role (engineer, lap reviewer, decision model) is configured with an OpenAI-compatible base URL, headers and model name. Whisper (STT) and TTS run locally and are swappable behind interfaces.
 
 ### Decision model
