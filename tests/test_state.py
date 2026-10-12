@@ -202,3 +202,19 @@ def test_a_single_garbage_upward_lap_number_does_not_freeze_tracking():
             events.append(ev)
     assert [e.record.lap for e in events] == [1, 2, 3]  # real laps still counted, glitch never became one
     assert max(store.fuel_at_lap_start) == 4
+
+
+def test_full_race_still_reports_race_start_fuel():
+    store, _ = run_sim(lap_seconds=3, total_laps=4, start_fuel=40.0)
+    sm = store.summary()
+    assert sm["fuel_at_race_start_l"] == 40.0 and "fuel_at_race_start_note" not in sm  # seen, not assumed
+
+
+def test_joining_mid_race_in_the_sim_assumes_full_tank():
+    frames = [f for f in sim_frames(lap_seconds=3, total_laps=6, start_fuel=100.0, fuel_per_lap=7.0) if f.lap >= 3]
+    store = StateStore()
+    for f in frames:
+        store.update(f)
+    sm = store.summary()
+    assert sm["fuel_at_race_start_l"] == 100.0 and "assumed a full tank" in sm["fuel_at_race_start_note"]
+    assert abs(sm["fuel_burned_total_l"] - (100.0 - sm["fuel_l"])) < 0.6

@@ -64,6 +64,7 @@ class StateStore:
         self._prev_fuel: float | None = None
         self._lap_min_fuel = float("inf")  # lowest fuel level seen this lap (to tell refuels from jitter)
         self._fuel_burned = 0.0  # litres burnt this race: every drop in the tank counts, refuels don't subtract
+        self._joined: tuple[int, float] | None = None  # (lap, fuel) of the first frame we saw
         self._observed_s = 0.0  # running time we have actually watched (for the burn-rate estimate)
         self._prev_t: float | None = None
         self.fuel_at_lap_start: dict[int, float] = {}  # lap number -> litres when it began (whole race)
@@ -111,6 +112,8 @@ class StateStore:
                 self.start_position = f.race_position
         if not f.on_track:
             return None
+        if self._joined is None:
+            self._joined = (f.lap, f.fuel)
         if self._prev_t is not None:
             self._observed_s += min(1.0, max(0.0, f.t - self._prev_t))  # gaps in the stream don't count as time
         self._prev_t = f.t
@@ -284,10 +287,24 @@ class StateStore:
             out["fuel_burn_trend"] = f"{trend[1]} ({trend[0]:+.2f} L/lap every lap)"
         if c.last_lap_ms > 0 and c.best_lap_ms > 0:
             out["last_lap_vs_best_s"] = round((c.last_lap_ms - c.best_lap_ms) / 1000, 2)  # + slower, - faster
-        if self.fuel_at_lap_start:
-            out["fuel_at_race_start_l"] = round(self.fuel_at_lap_start[min(self.fuel_at_lap_start)], 1)
-        if self._fuel_burned > 0:
-            out["fuel_burned_total_l"] = round(self._fuel_burned, 1)
+        # Fuel at the race start. If we joined mid-race we never saw it, so assume a full tank (races start full).
+        start = None
+        assumed = False
+        if 1 in self.fuel_at_lap_start:
+            start = self.fuel_at_lap_start[1]
+        elif self._joined is not None and c.fuel_capacity > 0:
+            start, assumed = c.fuel_capacity, True
+        if start is not None:
+            out["fuel_at_race_start_l"] = round(start, 1)
+            if assumed:
+                out["fuel_at_race_start_note"] = (
+                    f"assumed a full tank: the race start was not seen (tracking began on lap {self._joined[0]})"
+                )
+        if self._fuel_burned > 0 or assumed:
+            burned = self._fuel_burned
+            if assumed:  # add what was burned before we started watching
+                burned += max(0.0, start - self._joined[1])
+            out["fuel_burned_total_l"] = round(burned, 1)
         if self._lap_start_fuel is not None and not self._refuelled and not self._lap_partial:
             out["fuel_used_this_lap_so_far_l"] = round(max(0.0, self._lap_start_fuel - c.fuel), 1)
         if self.fuel_at_lap_start:

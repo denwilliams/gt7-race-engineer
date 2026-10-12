@@ -74,7 +74,7 @@ def test_real_fuel_jitter_is_not_counted_as_burn():
     store, _ = replay()
     frames = load()
     net = frames[0].fuel - frames[-1].fuel  # 17.65 L actually left the tank
-    burned = store.summary()["fuel_burned_total_l"]
+    burned = store._fuel_burned  # litres watched leaving the tank (the summary adds the assumed pre-join part)
     assert abs(burned - net) < 1.0, (burned, net)  # within ~5%, not 22.8
     assert not store._refuelled  # and none of the wobble looked like a pit stop
 
@@ -88,4 +88,13 @@ def test_a_real_refuel_still_resets_the_baseline_and_is_not_subtracted():
     for f in refuelled:
         store.update(f)
     expected = frames[0].fuel - frames[299].fuel + (frames[300].fuel - frames[599].fuel)  # drops either side of the stop
-    assert abs(store.summary()["fuel_burned_total_l"] - expected) < 1.0
+    assert abs(store._fuel_burned - expected) < 1.0
+
+
+def test_joining_mid_race_assumes_a_full_tank_at_the_start_and_says_so():
+    store, _ = replay()
+    sm = store.summary()
+    assert sm["fuel_at_race_start_l"] == 100.0  # the tank capacity in this capture: races start full
+    assert "assumed a full tank" in sm["fuel_at_race_start_note"] and "lap 3" in sm["fuel_at_race_start_note"]
+    # burned so far = pre-join (100 - 72.55) + watched (17.6) = whole race to date, i.e. 100 - now
+    assert abs(sm["fuel_burned_total_l"] - (100.0 - sm["fuel_l"])) < 1.0
