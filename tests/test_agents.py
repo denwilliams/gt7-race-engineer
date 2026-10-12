@@ -48,3 +48,33 @@ def test_pace_mentions_best_lap():
     msgs = drain(bus)
     assert msgs and all(m.level == MENTION for m in msgs)
     assert any("Lap" in m.message for m in msgs)
+
+
+class FakeLLM:
+    def __init__(self, reply):
+        self.reply, self.prompts = reply, []
+
+    async def chat(self, messages, **kw):
+        self.prompts.append(messages[-1]["content"])
+        return self.reply
+
+
+def test_lap_trace_publishes_coaching_and_compares_to_best():
+    from gt7_engineer.agents.lap_trace import LapTraceAgent
+
+    store, bus = StateStore(), Bus()
+    llm = FakeLLM("Brake later into turn 3.")
+    agent = LapTraceAgent(store, bus, llm)
+    drive(store, [agent], lap_seconds=3, total_laps=4)
+    msgs = drain(bus)
+    assert len(msgs) == 3 and msgs[0].message == "Brake later into turn 3."
+    assert "Best lap" not in llm.prompts[0] and "Best lap" in llm.prompts[-1]
+    assert "kph" in llm.prompts[0]
+
+
+def test_lap_trace_silent_when_nothing_notable():
+    from gt7_engineer.agents.lap_trace import LapTraceAgent
+
+    store, bus = StateStore(), Bus()
+    drive(store, [LapTraceAgent(store, bus, FakeLLM("Nothing notable."))], lap_seconds=3, total_laps=3)
+    assert drain(bus) == []
