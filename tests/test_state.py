@@ -218,3 +218,40 @@ def test_joining_mid_race_in_the_sim_assumes_full_tank():
     sm = store.summary()
     assert sm["fuel_at_race_start_l"] == 100.0 and "assumed a full tank" in sm["fuel_at_race_start_note"]
     assert abs(sm["fuel_burned_total_l"] - (100.0 - sm["fuel_l"])) < 0.6
+
+
+# ---- robust statistics: one odd lap (ran wide, traffic, a spin) must not move the reference
+def store_with_laps(burns=(), times=(), valid=None):
+    from gt7_engineer.state import LapRecord
+
+    s = StateStore()
+    for i, (b, t) in enumerate(zip(burns or [13.0] * len(times), times or [90000] * len(burns)), 1):
+        s.laps.append(LapRecord(i, t, b, [], burn_valid=True if valid is None else valid[i - 1]))
+    return s
+
+
+def test_fuel_per_lap_is_the_median_not_the_mean():
+    s = store_with_laps(burns=[13.0, 13.1, 13.0, 12.9, 24.0])  # the last lap burned a lot (a spin, a lift-and-coast)
+    assert abs(s.fuel_per_lap - 13.0) < 0.15  # the mean would be 15.2
+
+
+def test_burn_trend_ignores_a_single_wild_lap():
+    s = store_with_laps(burns=[13.0, 13.1, 13.0, 13.1, 25.0])
+    assert s.burn_trend[1] == "steady"  # a least-squares fit calls this "heavier"
+    s = store_with_laps(burns=[12.0, 12.6, 13.2, 13.8, 14.4])  # a genuine, steady climb is still found
+    assert s.burn_trend[1] == "heavier"
+
+
+def test_pace_typical_lap_ignores_pit_laps_and_mistakes():
+    import asyncio
+
+    from gt7_engineer.agents.pace import PaceAgent
+    from gt7_engineer.bus import Bus
+    from gt7_engineer.llm import ThresholdDecision
+    from gt7_engineer.state import LapRecord, NewLap
+
+    s = store_with_laps(times=[90000, 91000, 90000, 91000, 134000, 90500], valid=[True, True, True, True, False, True])
+    agent = PaceAgent(s, Bus(), ThresholdDecision(lambda c: "ignore"))
+    ctx, _ = agent.measure_lap(NewLap(s.laps[-1]))  # the 90.5 s lap
+    # typical = median of the clean laps before it (90, 91, 90, 91) = 90.5; the 134 s pit lap is excluded
+    assert abs(ctx["delta_to_typical_s"]) < 0.1

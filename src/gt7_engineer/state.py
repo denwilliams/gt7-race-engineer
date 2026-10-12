@@ -320,9 +320,10 @@ class StateStore:
 
     @property
     def fuel_per_lap(self) -> float | None:
-        """Mean fuel burn over the last few complete laps, or an estimate until one is available."""
-        b = self.burns[-3:]
-        return sum(b) / len(b) if b else self.estimated_fuel_per_lap
+        """Typical fuel burn: the median of the last few complete laps (one odd lap can't move it),
+        or an estimate until a complete lap has been seen."""
+        b = self.burns
+        return statistics.median(b) if b else self.estimated_fuel_per_lap
 
     @property
     def fuel_per_lap_is_estimate(self) -> bool:
@@ -344,14 +345,14 @@ class StateStore:
     def burn_trend(self) -> tuple[float, str] | None:
         """(change in burn per lap in litres, 'heavier' | 'lighter' | 'steady').
 
-        Least-squares slope over the last up to 5 valid laps; needs at least 3.
+        Theil-Sen slope (the median of the slopes between every pair of laps) over the last up to 5
+        valid laps, so one wild lap cannot tip it; needs at least 3.
         """
         b = self.burns
         if len(b) < 3:
             return None
-        n = len(b)
-        xm, ym = (n - 1) / 2, sum(b) / n
-        slope = sum((i - xm) * (y - ym) for i, y in enumerate(b)) / sum((i - xm) ** 2 for i in range(n))
+        slope = statistics.median((b[j] - b[i]) / (j - i) for i in range(len(b)) for j in range(i + 1, len(b)))
+        ym = statistics.median(b)
         if abs(slope) / ym * 100 < TREND_STEADY_PCT:
             return slope, "steady"
         return slope, "heavier" if slope > 0 else "lighter"
