@@ -1,0 +1,20 @@
+# Copy to config.toml (git-ignored). Everything is optional; env GT7_PS_IP overrides ps_ip.
+ps_ip = "192.168.1.50"          # PlayStation IP (GT7 > Settings > Network shows it)
+stt_model = "mlx-community/whisper-small-mlx"
+tts_voice = "Samantha"          # any `say -v ?` voice
+
+# Any OpenAI-compatible endpoint: LM Studio (:1234), Ollama (:11434/v1), ...
+[engineer]
+base_url = "http://localhost:1234/v1"
+model = "your-chat-model"
+# headers = { Authorization = "Bearer ..." }
+
+# Optional: defaults to the [engineer] endpoint
+[lap_reviewer]
+model = "your-chat-model"
+
+# Optional: small decision model for the analysts (e.g. a Jev-Style server).
+# Omit it and the analysts use built-in thresholds.
+# [decision]
+# base_url = "http://localhost:8000/v1"
+# model = "jev-style-2b"

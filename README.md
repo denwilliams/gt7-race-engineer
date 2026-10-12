@@ -14,6 +14,37 @@ Models are reached through OpenAI-compatible endpoints (LM Studio, Ollama or sim
 - Driver can ask "how's my fuel?" by voice and get a correct spoken answer from live data.
 - Setup takes about 10 minutes from this README.
 
+## Quickstart
+
+Requires macOS on Apple silicon, [uv](https://docs.astral.sh/uv/), and an OpenAI-compatible server (LM Studio, Ollama, ...) with a chat model loaded.
+
+```sh
+uv sync --extra audio                  # installs deps incl. mic capture + MLX Whisper
+cp config.example.toml config.toml     # set ps_ip and your model name
+uv run gt7-engineer run                # on the PS5: start a race; the engineer connects automatically
+```
+
+GT7 telemetry is UDP: the Mac and PlayStation must be on the same network, and the Mac must allow incoming UDP on port 33740.
+
+Try it without a PlayStation, microphone or model:
+
+```sh
+uv run gt7-engineer run --simulate --no-audio --no-llm --laps 5 --lap-seconds 10
+uv run gt7-engineer run --simulate --text      # type to the engineer instead of speaking
+uv run gt7-engineer watch --ps-ip 192.168.1.50 # raw telemetry readout only
+uv run pytest                                  # tests
+```
+
+## Status
+
+Everything above runs end to end against the built-in simulator and is covered by tests. Not yet verified against real hardware or real local models:
+
+- The GT7 packet layout and heartbeat (`telemetry/packet.py`) follow community documentation and are round-trip tested only.
+- The Jev-Style decision model adapter assumes an OpenAI-compatible endpoint (`llm.py`).
+- Whisper and TTS quality and latency on the target Mac.
+
+Code layout: `telemetry/` (decode, UDP ingest, simulator), `state.py` (state + frame history), `agents/` (analysts), `engineer.py` (arbiter and conversation), `audio/` (Whisper STT, `say` TTS), `app.py` (wiring), `cli.py`.
+
 ## Architecture
 
 ```
@@ -49,7 +80,7 @@ Candidate: [Jev-Style](https://pypi.org/project/jev-style/), small local decisio
 
 ## Telemetry limits
 
-GT7 telemetry covers the player's own car (fuel, speeds, temperatures, lap times) plus race position and car count. It does not provide gaps to other cars, rivals or flags, and it does not report tyre wear (the driver reports it by voice instead).
+GT7 telemetry covers the player's own car (fuel, speeds, temperatures, lap times, lap counts). It does not provide live race position, gaps to other cars, rivals or flags (the position and car-count fields are pre-race values), and it does not report tyre wear (the driver reports it by voice instead).
 
 ## Non-goals (for now)
 
